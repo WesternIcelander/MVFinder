@@ -14,6 +14,21 @@ const ISRC_SESSIONS = 5;
 const LOCALIZE_LANGS = ["ja", "ko", "zh"];
 const MISS_TTL_MS = 3600_000;
 
+const ISRC_FORMAT = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
+
+/**
+ * "us-um7-12-34567", "USUM71234567 ", "isrc:USUM71234567" -> "USUM71234567".
+ * Case and anything but letters and digits are ignored. Throws 400 if it isn't an ISRC.
+ */
+export function normalizeIsrc(input) {
+  let s = String(input).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (s.length === 16 && s.startsWith("ISRC")) s = s.slice(4);
+  if (!ISRC_FORMAT.test(s)) {
+    throw new HttpError(400, "request", `Not an ISRC: "${input}" (expected 12 characters like USUM71234567; dashes and spaces are ignored)`);
+  }
+  return s;
+}
+
 const bool = (v) => v === "" || v === "1" || v === "true";
 
 /** Parse ?type=&all=&minConfidence=&explain= */

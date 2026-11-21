@@ -1,13 +1,15 @@
 import http from "node:http";
 import { config } from "./config.js";
-import { createResolver, parseOptions } from "./resolve.js";
-import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
+import { createResolver, normalizeIsrc, parseOptions } from "./resolve.js";
+import { getSpotifyItem, lookupIsrc, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
 import path from "node:path";
 import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
 
 const ROUTE = /^\/spotify\/(track|album|playlist)\/([A-Za-z0-9]{10,40})\/?$/;
+const ISRC_ROUTE = /^\/isrc\/([^/]+)\/?$/;
+const NOT_FOUND_MESSAGE = "Not found. Use GET /spotify/{track|album|playlist}/{id} or /isrc/{isrc}";
 
 const youtube = new YouTubeManager(config.youtube);
 // Match results persist across restarts, so a restart costs no Spotify or YouTube requests.
@@ -25,8 +27,24 @@ async function handle(url) {
     return [yt.ok ? 200 : 503, { status: yt.ok ? "ok" : "degraded", youtube: yt, spotify: spotifyStatus(), cacheEntries: resolver.cacheSize() }];
   }
 
+  const isrcRoute = url.pathname.match(ISRC_ROUTE);
+  if (isrcRoute) {
+    let raw;
+    try {
+      raw = decodeURIComponent(isrcRoute[1]);
+    } catch {
+      raw = isrcRoute[1];
+    }
+    const isrc = normalizeIsrc(raw);
+    const opts = parseOptions(url.searchParams);
+    // Spotify supplies the title, artists and duration that YouTube results are checked against.
+    // (YouTube's own ISRC search can't stand in: for unknown ISRCs it returns unrelated songs.)
+    const track = await lookupIsrc(isrc);
+    return [200, { source: { ...track, metadataSource: "api" }, matches: await resolver.matchTrack(track, opts) }];
+  }
+
   const m = url.pathname.match(ROUTE);
-  if (!m) throw new HttpError(404, "request", "Not found. Use GET /spotify/{track|album|playlist}/{id}");
+  if (!m) throw new HttpError(404, "request", NOT_FOUND_MESSAGE);
   const [, type, id] = m;
   const opts = parseOptions(url.searchParams);
   const item = await getSpotifyItem(type, id);

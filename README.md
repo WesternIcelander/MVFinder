@@ -1,12 +1,13 @@
 # MVFinder
 
-An HTTP API that takes a Spotify track, album or playlist and returns the matching
+An HTTP API that takes a Spotify track, album or playlist (or an ISRC) and returns the matching
 **YouTube Music song** (audio track) and **YouTube music video** for each track, as JSON.
 
 ```
 GET /spotify/track/6khnYqsyOTFq1SgpCi3Ucx
 GET /spotify/album/4m2880jivSbbyEGAKfITCa
 GET /spotify/playlist/33YxQ9R7gaOhNOjA1nKph1
+GET /isrc/JP92Q2503558
 ```
 
 The path mirrors the Spotify URL: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
@@ -117,11 +118,25 @@ but only when it's clearly the same song (confidence ≥ 0.75).
 | `truncated` | `true`/`false`, or `null` if unknown. See [Limitations](#limitations) |
 | `metadataSource` / `trackListSource` | `api` or `embed`: where the data came from |
 
+### `GET /isrc/{isrc}`
+
+The same as a Spotify track, but looked up by ISRC (the code that identifies a recording), with the
+same query parameters and response. The input is lenient: case, dashes, spaces and dots are
+ignored, as is an `ISRC` prefix, so `jp-92q-25-03558` and `ISRC: JP92Q2503558` both work.
+
+The ISRC is looked up on Spotify (one search request the first time, then cached; an unknown ISRC
+is remembered for a day), and that track is matched as usual. `source` is that Spotify track.
+This needs the Spotify API: without credentials, or while the API can't be used (rate limit or
+daily budget), the route answers `503`. YouTube Music's own ISRC search can't stand in: for an
+ISRC it doesn't know, it returns unrelated songs, and nothing would show that they're wrong.
+An ISRC Spotify doesn't have gives `404`, and input that isn't an ISRC gives `400`.
+
 #### Errors
 
 `{"error": {"status": 404, "source": "spotify", "message": "Spotify track … not found"}}`, with status
-`400` for bad parameters, `404` for an unknown route or Spotify item, `502` when Spotify or YouTube
-failed, and `503` when no working YouTube library is loaded yet.
+`400` for bad parameters or ISRCs, `404` for an unknown route, Spotify item or ISRC, `502` when
+Spotify or YouTube failed, and `503` when no working YouTube library is loaded yet (or, for
+`/isrc`, when the Spotify API can't be used).
 
 ### `GET /health`
 

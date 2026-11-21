@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { coreTitle, scoreMatch, scriptLangs } from "../src/match.js";
 import { Client, refineKind, toResult } from "../src/youtube.js";
 import { pickVersion } from "../src/ytjs-package.js";
-import { createResolver, parseOptions, pick } from "../src/resolve.js";
+import { createResolver, normalizeIsrc, parseOptions, pick } from "../src/resolve.js";
 
 test("coreTitle strips Spotify suffixes", () => {
   assert.equal(coreTitle("Bohemian Rhapsody - Remastered 2011"), "Bohemian Rhapsody");
@@ -344,4 +344,13 @@ test("Client: sessions without config data are recreated; a failing search repla
   failing.add(4).add(5).add(6);
   await assert.rejects(client.search("q", "songs", 1), /403/); // gives up after two retries
   assert.equal(created, 6);
+});
+
+test("normalizeIsrc is lenient about case, dashes, spaces and a prefix", () => {
+  for (const s of ["USUM71234567", "us-um7-12-34567", " US UM7 12 34567 ", "isrc:USUM71234567", "US.UM7.12.34567", "TCJPR2239926"]) {
+    assert.match(normalizeIsrc(s), /^(USUM71234567|TCJPR2239926)$/, s);
+  }
+  for (const s of ["", "USUM7123456", "USUM712345678", "1SUM71234567", "USUM7123456X", "ISRCUSUM7123"]) {
+    assert.throws(() => normalizeIsrc(s), (e) => e.status === 400, s);
+  }
 });

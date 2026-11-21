@@ -315,6 +315,40 @@ export async function lookupTrack(trackId, lang = null) {
   }
 }
 
+/**
+ * The Spotify track with this (normalized) ISRC: one search request, cached on disk (a "not
+ * found" for a day). Throws 404 if Spotify has none, 503 if the API can't be used right now.
+ */
+export async function lookupIsrc(isrc) {
+  const key = `isrc:${isrc}`;
+  const cached = trackStore.get(key);
+  const notFound = () => new HttpError(404, "spotify", `No Spotify track has ISRC ${isrc}`, 404);
+  if (cached?.notFound) throw notFound();
+  if (cached) return fetchTrack(cached.id); // usually cached as well
+  const reason = unavailableReason();
+  if (reason) throw new HttpError(503, "spotify", `ISRC lookups need the Spotify API, which can't be used right now: ${reason}`);
+  let pending = inFlight.get(key);
+  if (!pending) {
+    pending = api(`/search?type=track&limit=10&q=${encodeURIComponent(`isrc:${isrc}`)}`)
+      .then((r) => {
+        // Exact ISRC only (search can be fuzzy); several releases can share one, take the first.
+        const track = (r.tracks?.items ?? []).map((t) => trackFromApi(t)).find((t) => t?.isrc?.toUpperCase() === isrc) ?? null;
+        if (!track) {
+          trackStore.set(key, { notFound: true }, { ttlMs: NOT_FOUND_TTL_MS });
+          return null;
+        }
+        if (!isCached(track.id)) trackStore.set(track.id, track); // later /spotify/track lookups are free
+        trackStore.set(key, { id: track.id });
+        return track;
+      })
+      .finally(() => inFlight.delete(key));
+    inFlight.set(key, pending);
+  }
+  const track = await pending;
+  if (!track) throw notFound();
+  return structuredClone(track);
+}
+
 /** The track with names in another language, e.g. "ja" gives 「はるまきごはん」 for "Harumakigohan". */
 export const lookupLocalizedTrack = (trackId, lang) => lookupTrack(trackId, lang);
 
