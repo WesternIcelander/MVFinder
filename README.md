@@ -139,7 +139,8 @@ app. So the service spends as few requests as possible:
   lists that reach the embed page's 100-track cap, the real total comes from the public page.
 - **The API is used only per track, at most once per track.** Each lookup fetches the ISRC and
   the canonical names, and records are cached on disk, so repeated or overlapping playlists, and
-  restarts, cost nothing. Concurrent requests for the same track share one lookup.
+  restarts, cost nothing. Concurrent requests for the same track share one lookup. A "not found"
+  answer is cached for 1 day and then checked again, in case the problem was temporary.
 - **Requests are paced and counted against a daily budget** (`SPOTIFY_DAILY_REQUEST_BUDGET`,
   default 250). When the budget is used up, or Spotify answers `429` with a long `Retry-After`,
   the service stops calling the API until it's allowed again, and remembers this across

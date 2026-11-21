@@ -29,8 +29,17 @@ const openUrl = (type, id) => `https://open.spotify.com/${type}/${id}`;
 
 // "calls": timestamps of API requests in the last 24 h; "blockedUntil": end of a Retry-After.
 const state = new PersistentMap(path.join(config.dataDir, "spotify-state.json"), { saveDelayMs: 1000 });
-// "<id>" -> track record, "<id>|<lang>" -> localised record; null = not found.
+// "<id>" -> track record, "<id>|<lang>" -> localised record. Records don't expire; a "not found"
+// ({ notFound: true, at }) expires after NOT_FOUND_TTL_MS, in case the 404 was temporary.
 const trackStore = new PersistentMap(path.join(config.dataDir, "spotify-tracks.json"), { maxEntries: 200_000 });
+const NOT_FOUND_TTL_MS = DAY_MS;
+
+/** Whether `key` has a usable cache entry (a record, or a "not found" younger than a day). */
+function isCached(key) {
+  const entry = trackStore.get(key);
+  if (entry == null) return false; // absent (or a never-expiring null from an older version)
+  return !entry.notFound || Date.now() - entry.at < NOT_FOUND_TTL_MS;
+}
 
 const recentCalls = () => (state.get("calls") ?? []).filter((t) => t > Date.now() - DAY_MS);
 const blockedUntil = () => state.get("blockedUntil") ?? 0;
@@ -156,9 +165,9 @@ function trackFromApi(t, albumName = null) {
 /** One track from the API (optionally with names in `lang`), cached on disk. Throws if unavailable. */
 async function fetchTrack(id, lang = null) {
   const key = lang ? `${id}|${lang}` : id;
-  if (trackStore.has(key)) {
+  if (isCached(key)) {
     const cached = trackStore.get(key);
-    if (!cached) throw new HttpError(404, "spotify", `Spotify track ${id} not found`, 404);
+    if (cached.notFound) throw new HttpError(404, "spotify", `Spotify track ${id} not found`, 404);
     return structuredClone(cached);
   }
   // Concurrent requests for the same track share one API request.
@@ -171,7 +180,7 @@ async function fetchTrack(id, lang = null) {
         return track;
       })
       .catch((err) => {
-        if (err.upstreamStatus === 404) trackStore.set(key, null);
+        if (err.upstreamStatus === 404) trackStore.set(key, { notFound: true, at: Date.now() });
         throw err;
       })
       .finally(() => inFlight.delete(key));
@@ -293,7 +302,7 @@ async function fromEmbed(type, id) {
 export async function lookupTrack(trackId, lang = null) {
   if (!trackId) return null;
   const key = lang ? `${trackId}|${lang}` : trackId;
-  if (!trackStore.has(key) && unavailableReason()) return null;
+  if (!isCached(key) && unavailableReason()) return null;
   try {
     return await fetchTrack(trackId, lang);
   } catch (err) {
@@ -311,7 +320,7 @@ export const lookupLocalizedTrack = (trackId, lang) => lookupTrack(trackId, lang
  */
 export async function getSpotifyItem(type, id) {
   if (type === "track") {
-    if (trackStore.has(id) || !unavailableReason()) {
+    if (isCached(id) || !unavailableReason()) {
       try {
         const track = await fetchTrack(id);
         return { source: { ...track, metadataSource: "api" }, tracks: [track] };
