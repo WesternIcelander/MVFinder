@@ -1,0 +1,13 @@
+services:
+  mvfinder:
+    build: .
+    image: mvfinder
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ytjs-data:/data
+    restart: unless-stopped
+
+volumes:
+  ytjs-data:

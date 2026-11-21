@@ -1,0 +1,15 @@
+{
+  "name": "mvfinder",
+  "version": "0.2.0",
+  "description": "HTTP API: Spotify link in, matching YouTube Music song / YouTube music video out.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,6 @@
+node_modules
+.env
+.ytjs
+.data
+.DS_Store
+*.log
