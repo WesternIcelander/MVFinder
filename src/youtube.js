@@ -7,7 +7,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { HttpError, Semaphore, log } from "./util.js";
+import { HttpError, Semaphore, log, sleep } from "./util.js";
 import {
   PKG,
   installVersion,
@@ -72,42 +72,72 @@ export function toResult(item) {
   };
 }
 
-class Client {
+export class Client {
   constructor(mod, { version, dir, source }, cfg) {
-    Object.assign(this, { mod, version, dir, source, cfg, loadedAt: null, reinit: null });
+    Object.assign(this, { mod, version, dir, source, cfg, loadedAt: null });
   }
 
-  createSession() {
-    return this.mod.Innertube.create({ retrieve_player: false, lang: this.cfg.lang, location: this.cfg.location });
+  // When YouTube answers the session's config request with an HTML page (it sometimes does,
+  // e.g. under bursts), youtubei.js logs an error but returns the session anyway, and searches
+  // on it can then fail with 403. So check for the config and try again a couple of times.
+  async createSession() {
+    let yt;
+    for (let attempt = 1; attempt <= SESSION_ATTEMPTS; attempt++) {
+      yt = await this.mod.Innertube.create({ retrieve_player: false, lang: this.cfg.lang, location: this.cfg.location });
+      if (yt.session?.config_data !== undefined || !("config_data" in (yt.session ?? {}))) return yt;
+      log(`youtube: session created without config data (attempt ${attempt}/${SESSION_ATTEMPTS})`);
+      if (attempt < SESSION_ATTEMPTS) await sleep((this.cfg.sessionRetryDelayMs ?? 1000) * attempt);
+    }
+    return yt; // may still work; a failing search replaces it
   }
 
   async init() {
     try {
       this.mod.Log?.setLevel?.(this.mod.Log.Level.ERROR); // silence parser warnings
     } catch {}
-    this.yt = await this.createSession();
-    this.extraSessions = [];
+    this.sessions = [];
+    await this.session(0);
   }
 
-  // Some searches (notably by ISRC) give different results per session, and a session that gets
-  // a bad result keeps getting it. So callers can ask for an alternative session; those are
-  // created on first use and replaced after EXTRA_SESSION_TTL_MS, so later retries see new ones.
+  // Session 0 serves ordinary searches. Some searches (notably by ISRC) give different results
+  // per session, and a session that gets a bad result keeps getting it, so callers can ask for
+  // alternative sessions (n > 0); those are created on first use and replaced after
+  // EXTRA_SESSION_TTL_MS, so later retries see new ones.
   session(n) {
-    if (!n) return this.yt;
-    const cur = this.extraSessions[n];
-    if (!cur || Date.now() - cur.createdAt > EXTRA_SESSION_TTL_MS) {
-      const promise = this.createSession().catch((err) => {
-        if (this.extraSessions[n]?.promise === promise) this.extraSessions[n] = null;
-        throw err;
-      });
-      this.extraSessions[n] = { promise, createdAt: Date.now() };
-    }
-    return this.extraSessions[n].promise;
+    const cur = this.sessions[n];
+    if (!cur || (n > 0 && Date.now() - cur.createdAt > EXTRA_SESSION_TTL_MS)) this.renewSession(n);
+    return this.sessions[n].promise;
+  }
+
+  /** Replace session n (unless `stale` is given and it has already been replaced). */
+  renewSession(n, stale = null) {
+    if (stale && this.sessions[n]?.promise !== stale) return;
+    const promise = this.createSession().catch((err) => {
+      if (this.sessions[n]?.promise === promise) this.sessions[n] = null;
+      throw err;
+    });
+    this.sessions[n] = { promise, createdAt: Date.now() };
   }
 
   /** filter: "songs" | "videos" */
+  // Sessions can go bad or stale, and under bursts YouTube refuses some searches (403) for a
+  // little while. So on failure, wait, replace this session (only), and try again.
   async search(query, filter, sessionIndex = 0) {
-    const yt = await this.session(sessionIndex);
+    const delays = this.cfg.searchRetryDelaysMs ?? SEARCH_RETRY_DELAYS_MS;
+    for (let attempt = 0; ; attempt++) {
+      const session = this.session(sessionIndex);
+      try {
+        return await this.searchWith(await session, query, filter);
+      } catch (err) {
+        if (attempt >= delays.length) throw err;
+        log(`youtube: search failed (${err.message.slice(-60)}); retrying on a new session`);
+        this.renewSession(sessionIndex, session);
+        await sleep(delays[attempt]);
+      }
+    }
+  }
+
+  async searchWith(yt, query, filter) {
     const r = await yt.music.search(query, { type: filter === "songs" ? "song" : "video" });
     return (r.contents ?? [])
       .filter((s) => s.type === "MusicShelf")
@@ -132,6 +162,8 @@ async function selfTest(client) {
 
 const RETRIGGER_MS = 30 * 60_000; // min gap between failure-triggered update checks
 const EXTRA_SESSION_TTL_MS = 30 * 60_000;
+const SESSION_ATTEMPTS = 3;
+const SEARCH_RETRY_DELAYS_MS = [2000, 5000];
 
 export class YouTubeManager {
   constructor(cfg) {
@@ -288,16 +320,7 @@ export class YouTubeManager {
     }
     await this.sem.acquire();
     try {
-      try {
-        return await client.search(query, filter, session);
-      } catch {
-        // Sessions can go stale: recreate it once before blaming the library.
-        client.reinit ??= client.init().finally(() => {
-          client.reinit = null;
-        });
-        await client.reinit;
-        return await client.search(query, filter, session);
-      }
+      return await client.search(query, filter, session); // replaces a failing session and retries once
     } catch (err) {
       this.checkForUpdate("search-error");
       throw new HttpError(502, "youtube", `YouTube search failed: ${err.message}`);

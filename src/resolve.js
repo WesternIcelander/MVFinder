@@ -94,10 +94,18 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
   }
 
   // Try the ISRC on several sessions; every top hit is collected in `tops` for re-checking later.
-  async function isrcMatch(track, aliases, tops) {
+  // A session whose search fails is skipped (the text searches still run), but the result is
+  // then marked incomplete so it isn't cached for long.
+  async function isrcMatch(track, aliases, tops, flags) {
     if (!track.isrc) return null;
     for (let session = 0; session < ISRC_SESSIONS; session++) {
-      const [top] = await youtube.search(track.isrc, "songs", { session });
+      let top;
+      try {
+        [top] = await youtube.search(track.isrc, "songs", { session });
+      } catch {
+        flags.incomplete = true;
+        continue;
+      }
       if (top) tops.push(top);
       const hit = verifyIsrcTop(track, top, aliases);
       if (hit) return hit;
@@ -138,9 +146,9 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     if (ytArtist && !track.artists.includes(ytArtist) && !aliases.artists.includes(ytArtist)) aliases.artists.push(ytArtist);
   }
 
-  async function compute(track, opts, aliases) {
+  async function compute(track, opts, aliases, flags) {
     const isrcTops = [];
-    let isrcHit = await isrcMatch(track, aliases, isrcTops);
+    let isrcHit = await isrcMatch(track, aliases, isrcTops, flags);
     if (isrcHit) addHitAliases(track, isrcHit, aliases);
 
     const searches = [];
@@ -184,11 +192,12 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     if (hit !== undefined) return hit;
     // Missing ISRC only because the Spotify API was unavailable: recompute sooner.
     const lackedIsrc = !track.isrc && degraded();
-    const value = await compute(track, opts, aliases);
+    const flags = { incomplete: false };
+    const value = await compute(track, opts, aliases, flags);
     if (ttl > 0) {
       // YouTube results vary between sessions, so don't hold on to a miss for long.
-      // Likewise for results computed without the ISRC.
-      const life = value.length && !lackedIsrc ? ttl : Math.min(ttl, MISS_TTL_MS);
+      // Likewise for results computed without the ISRC, or with some ISRC searches failed.
+      const life = value.length && !lackedIsrc && !flags.incomplete ? ttl : Math.min(ttl, MISS_TTL_MS);
       cache.set(key, value, { ttlMs: life });
     }
     return value;

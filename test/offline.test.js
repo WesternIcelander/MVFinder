@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { coreTitle, scoreMatch, scriptLangs } from "../src/match.js";
-import { refineKind, toResult } from "../src/youtube.js";
+import { Client, refineKind, toResult } from "../src/youtube.js";
 import { pickVersion } from "../src/ytjs-package.js";
 import { createResolver, parseOptions, pick } from "../src/resolve.js";
 
@@ -288,4 +288,60 @@ test("resolver cache: a hit costs no searches; misses get the short lifetime", a
   const row = (key) => store.db.prepare("SELECT expires_at - used_at AS life FROM kv WHERE key LIKE ?").get(`${key}|%`);
   assert.equal(row("hit").life, 24 * 3600_000);
   assert.equal(row("miss").life, 3600_000);
+});
+
+test("resolver: a failing ISRC session is skipped, and the result is cached only briefly", async () => {
+  const { Store, openDatabase } = await import("../src/store.js");
+  const store = new Store(openDatabase(":memory:"), "matches");
+  const song = ytItem({ videoId: "S1", title: "アイスドロップ", artists: ["Aqu3ra"], durationMs: 225000 });
+  const youtube = {
+    search: async (q, filter, { session = 0 } = {}) => {
+      if (q === "TCJPR2239926") {
+        if (session === 0) throw new Error("status code 403");
+        return [song];
+      }
+      return [];
+    },
+  };
+  const track = { id: "ice", title: "Ice Drop", artists: ["Aqu3ra"], durationMs: 224856, isrc: "TCJPR2239926" };
+  const m = await createResolver({ youtube, lookupTrack: noLookup, ttlHours: 24, store }).matchTrack(track, opts);
+  assert.deepEqual(m.map((x) => [x.videoId, x.matchedBy]), [["S1", "isrc"]]);
+  const { life } = store.db.prepare("SELECT expires_at - used_at AS life FROM kv").get();
+  assert.equal(life, 3600_000);
+});
+
+test("Client: sessions without config data are recreated; a failing search replaces only its session and retries", async () => {
+  let created = 0;
+  const failing = new Set();
+  const mod = {
+    Innertube: {
+      create: async () => {
+        const id = ++created;
+        return {
+          id,
+          session: { config_data: id === 1 ? undefined : {} }, // the first comes back without config
+          music: {
+            search: async () => {
+              if (failing.has(id)) throw new Error("status code 403");
+              return { contents: [] };
+            },
+          },
+        };
+      },
+    },
+  };
+  const client = new Client(mod, { version: "x" }, { sessionRetryDelayMs: 0, searchRetryDelaysMs: [0, 0] });
+  await client.init();
+  assert.equal(created, 2); // retried once, because the first had no config
+  assert.equal((await client.session(0)).id, 2);
+
+  assert.equal((await client.session(1)).id, 3);
+  failing.add(3);
+  assert.deepEqual(await client.search("q", "songs", 1), []);
+  assert.equal((await client.session(1)).id, 4); // session 1 replaced...
+  assert.equal((await client.session(0)).id, 2); // ...session 0 kept
+
+  failing.add(4).add(5).add(6);
+  await assert.rejects(client.search("q", "songs", 1), /403/); // gives up after two retries
+  assert.equal(created, 6);
 });

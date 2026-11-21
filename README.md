@@ -175,8 +175,15 @@ track, official video or user upload.
    Videos titled "Official Video" beat untitled cuts. YouTube tags many static "Official Audio"
    uploads as official videos; those are detected by title and never returned as the music video.
 
-Matches are cached per track on disk for 24 h. Misses, and results computed without the ISRC,
-are cached for 1 h. YouTube searches are capped at 4 at a time across all requests.
+Matches are cached per track on disk for 24 h. Misses, results computed without the ISRC, and
+results where some ISRC searches failed are cached for 1 h. YouTube searches are capped at 4 at a
+time across all requests.
+
+YouTube occasionally hands out a broken session, whose configuration request returns an HTML page
+instead of data, and under bursts it refuses some searches with `403` for a short while. New
+sessions are checked and recreated if broken. A failed search is retried twice, 2 s and then 5 s
+later, each time on a new session. An ISRC search that still fails is skipped; the text searches
+still run.
 
 ## Automatic YouTube library updates
 
