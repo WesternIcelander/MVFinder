@@ -1,4 +1,4 @@
-// Turns one Spotify track into ranked YouTube matches, with a cache.
+// Turns one track (from Spotify, or an ISRC's reference record) into ranked YouTube matches, with a cache.
 
 import { scoreMatch, scriptLangs, searchQuery } from "./match.js";
 import { hasVideoMarker } from "./youtube.js";
@@ -13,21 +13,6 @@ const ISRC_SESSIONS = 5;
 // Languages we can ask Spotify for when YouTube shows names in their script.
 const LOCALIZE_LANGS = ["ja", "ko", "zh"];
 const MISS_TTL_MS = 3600_000;
-
-const ISRC_FORMAT = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/;
-
-/**
- * "us-um7-12-34567", "USUM71234567 ", "isrc:USUM71234567" -> "USUM71234567".
- * Case and anything but letters and digits are ignored. Throws 400 if it isn't an ISRC.
- */
-export function normalizeIsrc(input) {
-  let s = String(input).toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (s.length === 16 && s.startsWith("ISRC")) s = s.slice(4);
-  if (!ISRC_FORMAT.test(s)) {
-    throw new HttpError(400, "request", `Not an ISRC: "${input}" (expected 12 characters like USUM71234567; dashes and spaces are ignored)`);
-  }
-  return s;
-}
 
 const bool = (v) => v === "" || v === "1" || v === "true";
 
@@ -132,6 +117,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
   // "Harumakigohan"), ask Spotify for the track in that language: it often has the native artist
   // name (and sometimes title). Returns true if that produced a new alias.
   async function localize(track, aliases, candidates) {
+    if (track.service && track.service !== "spotify") return false; // no Spotify ID to look up
     const own = new Set([track.title, ...track.artists].flatMap(scriptLangs));
     const seen = new Set(candidates.flatMap((c) => [c.title, ...c.artists]).flatMap(scriptLangs));
     const langs = LOCALIZE_LANGS.filter((l) => seen.has(l) && !own.has(l)).slice(0, 2);
@@ -202,7 +188,9 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     // Before the cache check, so the response shows the API record (ISRC etc.) either way.
     const aliases = { titles: [], artists: [] };
     await enrich(track, aliases);
-    const key = [track.id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
+    // IDs from other services (an ISRC's Deezer or MusicBrainz record) get a prefix.
+    const id = track.service && track.service !== "spotify" ? `${track.service}:${track.id}` : track.id;
+    const key = [id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
     const hit = cache.get(key);
     if (hit !== undefined) return hit;
     // Missing ISRC only because the Spotify API was unavailable: recompute sooner.

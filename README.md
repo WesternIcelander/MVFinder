@@ -124,12 +124,31 @@ The same as a Spotify track, but looked up by ISRC (the code that identifies a r
 same query parameters and response. The input is lenient: case, dashes, spaces and dots are
 ignored, as is an `ISRC` prefix, so `jp-92q-25-03558` and `ISRC: JP92Q2503558` both work.
 
-The ISRC is looked up on Spotify (one search request the first time, then cached; an unknown ISRC
-is remembered for a day), and that track is matched as usual. `source` is that Spotify track.
-This needs the Spotify API: without credentials, or while the API can't be used (rate limit or
-daily budget), the route answers `503`. YouTube Music's own ISRC search can't stand in: for an
-ISRC it doesn't know, it returns unrelated songs, and nothing would show that they're wrong.
-An ISRC Spotify doesn't have gives `404`, and input that isn't an ISRC gives `400`.
+The ISRC's title, artists and duration come from the first of these sources that has it, and
+that recording is matched as usual. `source` is that record, and `source.service` says where it
+came from:
+
+1. **Spotify** (`spotify`): one search request the first time. Skipped without credentials or
+   while the API can't be used (rate limit or daily budget).
+2. **Deezer** (`deezer`): free public API, no key, doesn't touch the Spotify budget.
+3. **MusicBrainz** (`musicbrainz`): free, community-maintained, and often has releases the
+   streaming services never carried. Requests are kept to 1 per second, as MusicBrainz asks.
+   MusicBrainz answers `503` when it is rate limiting, so a `503` is retried twice (2 s and 5 s
+   later) and slows down later requests too.
+
+Answers are cached on disk; an ISRC a source doesn't have is remembered for a day. Set
+`ISRC_FALLBACKS` to change or turn off sources 2 and 3.
+
+Records from Deezer and MusicBrainz never cause Spotify requests. MusicBrainz records sometimes
+lack a duration, and then only the text search can find the song.
+
+YouTube Music's own ISRC search can't serve as a source: for an ISRC it doesn't know, it returns
+unrelated songs, and nothing would show that they're wrong. So an ISRC that is only on YouTube
+gives `404`.
+
+Status codes: `400` if the input isn't an ISRC, `404` if no source has it, and `503` (temporary;
+a source is rate limited or unavailable) or `502` (a source failed) if it wasn't found but some
+source couldn't be asked.
 
 #### Errors
 
@@ -235,6 +254,8 @@ library itself:
 | `YTJS_UPDATE_INTERVAL_HOURS` | `6` | How often to self-test and check for updates |
 | `YT_CONCURRENCY` | `4` | Concurrent YouTube searches, across all requests |
 | `YT_LOCATION` | `US` | YouTube region |
+| `ISRC_FALLBACKS` | `deezer,musicbrainz` | Sources `/isrc` asks after Spotify, in order. Empty to use Spotify only |
+| `MUSICBRAINZ_USER_AGENT` | `isrc-lookup/1.0` | MusicBrainz asks for `AppName/version ( contact-url-or-email )` |
 | `CACHE_TTL_HOURS` / `CACHE_MAX_ENTRIES` | `24` / `20000` | Per-track match cache (on disk) |
 | `DATA_DIR` | `/data` | Caches, request counter and auto-updated library versions |
 

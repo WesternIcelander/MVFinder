@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { coreTitle, scoreMatch, scriptLangs } from "../src/match.js";
 import { Client, refineKind, toResult } from "../src/youtube.js";
 import { pickVersion } from "../src/ytjs-package.js";
-import { createResolver, normalizeIsrc, parseOptions, pick } from "../src/resolve.js";
+import { createResolver, parseOptions, pick } from "../src/resolve.js";
 
 test("coreTitle strips Spotify suffixes", () => {
   assert.equal(coreTitle("Bohemian Rhapsody - Remastered 2011"), "Bohemian Rhapsody");
@@ -346,11 +346,14 @@ test("Client: sessions without config data are recreated; a failing search repla
   assert.equal(created, 6);
 });
 
-test("normalizeIsrc is lenient about case, dashes, spaces and a prefix", () => {
-  for (const s of ["USUM71234567", "us-um7-12-34567", " US UM7 12 34567 ", "isrc:USUM71234567", "US.UM7.12.34567", "TCJPR2239926"]) {
-    assert.match(normalizeIsrc(s), /^(USUM71234567|TCJPR2239926)$/, s);
-  }
-  for (const s of ["", "USUM7123456", "USUM712345678", "1SUM71234567", "USUM7123456X", "ISRCUSUM7123"]) {
-    assert.throws(() => normalizeIsrc(s), (e) => e.status === 400, s);
-  }
+test("resolver: tracks from Deezer/MusicBrainz never trigger Spotify lookups", async () => {
+  // An all-Japanese ISRC top hit of the right length would normally ask Spotify for native names.
+  const top = ytItem({ videoId: "Z", title: "ゼロトーキング", artists: ["はるまきごはん"], durationMs: 215000 });
+  const youtube = fakeYouTube("JPX000000001", [top], []);
+  let calls = 0;
+  const lookup = async () => (calls++, null);
+  const r = createResolver({ youtube, lookupTrack: lookup, lookupLocalizedTrack: lookup, ttlHours: 0 });
+  const track = { service: "deezer", id: "42", title: "Zero Talking", artists: ["Harumakigohan"], durationMs: 215000, isrc: "JPX000000001" };
+  await r.matchTrack(track, opts);
+  assert.equal(calls, 0);
 });

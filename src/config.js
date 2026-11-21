@@ -29,6 +29,13 @@ export const config = {
     lang: "en",
     concurrency: num(env.YT_CONCURRENCY, 4),
   },
+  isrc: {
+    // Where /isrc looks when Spotify doesn't have the ISRC or its API can't be used, in order.
+    fallbacks: (env.ISRC_FALLBACKS ?? "deezer,musicbrainz").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    // MusicBrainz asks clients to identify themselves: "AppName/version ( contact-url-or-email )".
+    musicbrainzUserAgent: env.MUSICBRAINZ_USER_AGENT || "isrc-lookup/1.0",
+    musicbrainzRetryDelaysMs: env.ISRC_TEST_NO_DELAYS ? [0, 0] : null, // tests only
+  },
   cache: {
     ttlHours: num(env.CACHE_TTL_HOURS, 24),
     maxEntries: num(env.CACHE_MAX_ENTRIES, 20000),

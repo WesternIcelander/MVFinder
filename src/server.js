@@ -1,7 +1,8 @@
 import http from "node:http";
 import { config } from "./config.js";
-import { createResolver, normalizeIsrc, parseOptions } from "./resolve.js";
-import { getSpotifyItem, lookupIsrc, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
+import { createResolver, parseOptions } from "./resolve.js";
+import { lookupIsrcSource, normalizeIsrc } from "./isrc.js";
+import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
 import path from "node:path";
 import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
 import { HttpError, log } from "./util.js";
@@ -37,10 +38,12 @@ async function handle(url) {
     }
     const isrc = normalizeIsrc(raw);
     const opts = parseOptions(url.searchParams);
-    // Spotify supplies the title, artists and duration that YouTube results are checked against.
-    // (YouTube's own ISRC search can't stand in: for unknown ISRCs it returns unrelated songs.)
-    const track = await lookupIsrc(isrc);
-    return [200, { source: { ...track, metadataSource: "api" }, matches: await resolver.matchTrack(track, opts) }];
+    // Spotify, Deezer or MusicBrainz supplies the title, artists and duration that YouTube results
+    // are checked against. (YouTube's own ISRC search can't stand in: for ISRCs it doesn't know,
+    // it returns unrelated songs.)
+    const source = await lookupIsrcSource(isrc);
+    const { metadataSource, ...track } = source;
+    return [200, { source, matches: await resolver.matchTrack(track, opts) }];
   }
 
   const m = url.pathname.match(ROUTE);
