@@ -11,7 +11,7 @@
 
 import path from "node:path";
 import { config } from "./config.js";
-import { PersistentMap } from "./store.js";
+import { importLegacyJson, openStore } from "./store.js";
 import { HttpError, log, sleep } from "./util.js";
 
 const API = "https://api.spotify.com/v1";
@@ -28,18 +28,22 @@ const openUrl = (type, id) => `https://open.spotify.com/${type}/${id}`;
 // ---------------------------------------------------------------- Request budget and backoff
 
 // "calls": timestamps of API requests in the last 24 h; "blockedUntil": end of a Retry-After.
-const state = new PersistentMap(path.join(config.dataDir, "spotify-state.json"), { saveDelayMs: 1000 });
+const state = openStore("spotify-state");
 // "<id>" -> track record, "<id>|<lang>" -> localised record. Records don't expire; a "not found"
-// ({ notFound: true, at }) expires after NOT_FOUND_TTL_MS, in case the 404 was temporary.
-const trackStore = new PersistentMap(path.join(config.dataDir, "spotify-tracks.json"), { maxEntries: 200_000 });
+// ({ notFound: true }) expires after NOT_FOUND_TTL_MS, in case the 404 was temporary.
+const trackStore = openStore("spotify-tracks", { maxEntries: 200_000 });
 const NOT_FOUND_TTL_MS = DAY_MS;
 
-/** Whether `key` has a usable cache entry (a record, or a "not found" younger than a day). */
-function isCached(key) {
-  const entry = trackStore.get(key);
-  if (entry == null) return false; // absent (or a never-expiring null from an older version)
-  return !entry.notFound || Date.now() - entry.at < NOT_FOUND_TTL_MS;
-}
+const isCached = (key) => trackStore.has(key);
+
+// One-time import of the JSON caches used before SQLite.
+importLegacyJson(path.join(config.dataDir, "spotify-state.json"), (k, v) => state.set(k, v));
+importLegacyJson(path.join(config.dataDir, "spotify-tracks.json"), (k, v) => {
+  if (v == null) return; // old never-expiring "not found": drop, so it's checked again
+  if (!v.notFound) return trackStore.set(k, v);
+  const left = (v.at ?? 0) + NOT_FOUND_TTL_MS - Date.now();
+  if (left > 0) trackStore.set(k, { notFound: true }, { ttlMs: left });
+});
 
 const recentCalls = () => (state.get("calls") ?? []).filter((t) => t > Date.now() - DAY_MS);
 const blockedUntil = () => state.get("blockedUntil") ?? 0;
@@ -165,10 +169,10 @@ function trackFromApi(t, albumName = null) {
 /** One track from the API (optionally with names in `lang`), cached on disk. Throws if unavailable. */
 async function fetchTrack(id, lang = null) {
   const key = lang ? `${id}|${lang}` : id;
-  if (isCached(key)) {
-    const cached = trackStore.get(key);
+  const cached = trackStore.get(key);
+  if (cached !== undefined) {
     if (cached.notFound) throw new HttpError(404, "spotify", `Spotify track ${id} not found`, 404);
-    return structuredClone(cached);
+    return cached; // freshly parsed from the database: safe for callers to modify
   }
   // Concurrent requests for the same track share one API request.
   let pending = inFlight.get(key);
@@ -180,7 +184,7 @@ async function fetchTrack(id, lang = null) {
         return track;
       })
       .catch((err) => {
-        if (err.upstreamStatus === 404) trackStore.set(key, { notFound: true, at: Date.now() });
+        if (err.upstreamStatus === 404) trackStore.set(key, { notFound: true }, { ttlMs: NOT_FOUND_TTL_MS });
         throw err;
       })
       .finally(() => inFlight.delete(key));

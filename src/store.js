@@ -1,68 +1,125 @@
-// A Map that persists itself to a JSON file in DATA_DIR, so caches survive restarts.
-// Insertion order is kept (and refreshed on set), so it also works as an LRU.
+// Key-value caches in one SQLite database (Node's built-in node:sqlite), DATA_DIR/cache.db.
+// Lookups read only the entry asked for, writes touch only changed entries, entries can expire,
+// and each namespace can be capped (least recently used entries are dropped first).
 
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { config } from "./config.js";
 
-const stores = [];
+const TOUCH_AFTER_MS = 3600_000; // refresh an entry's "last used" time at most hourly
+const EVICT_EVERY_SETS = 100;
 
-export class PersistentMap {
-  constructor(file, { maxEntries = Infinity, saveDelayMs = 5000 } = {}) {
-    Object.assign(this, { file, maxEntries, saveDelayMs, timer: null, map: new Map() });
-    try {
-      for (const [k, v] of JSON.parse(fs.readFileSync(file, "utf8"))) this.map.set(k, v);
-    } catch {} // missing or unreadable: start empty
-    stores.push(this);
+export function openDatabase(file) {
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
+    CREATE TABLE IF NOT EXISTS kv (
+      ns         TEXT    NOT NULL,
+      key        TEXT    NOT NULL,
+      value      TEXT    NOT NULL, -- JSON
+      expires_at INTEGER,          -- epoch ms; NULL = never
+      used_at    INTEGER NOT NULL, -- epoch ms, for LRU eviction
+      PRIMARY KEY (ns, key)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS kv_used ON kv (ns, used_at);
+    CREATE INDEX IF NOT EXISTS kv_expires ON kv (expires_at) WHERE expires_at IS NOT NULL;
+  `);
+  return db;
+}
+
+/** One namespace of the kv table, with a Map-like interface. */
+export class Store {
+  constructor(db, ns, { maxEntries = Infinity } = {}) {
+    Object.assign(this, { db, ns, maxEntries, setsSinceEvict: 0 });
+    this.q = {
+      get: db.prepare("SELECT value, expires_at, used_at FROM kv WHERE ns = ? AND key = ?"),
+      set: db.prepare(`INSERT INTO kv (ns, key, value, expires_at, used_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (ns, key) DO UPDATE SET value = excluded.value, expires_at = excluded.expires_at, used_at = excluded.used_at`),
+      touch: db.prepare("UPDATE kv SET used_at = ? WHERE ns = ? AND key = ?"),
+      delete: db.prepare("DELETE FROM kv WHERE ns = ? AND key = ?"),
+      size: db.prepare("SELECT COUNT(*) AS n FROM kv WHERE ns = ? AND (expires_at IS NULL OR expires_at > ?)"),
+      total: db.prepare("SELECT COUNT(*) AS n FROM kv WHERE ns = ?"),
+      evict: db.prepare("DELETE FROM kv WHERE ns = ? AND key IN (SELECT key FROM kv WHERE ns = ? ORDER BY used_at LIMIT ?)"),
+    };
+    this.evict();
   }
 
-  get size() {
-    return this.map.size;
-  }
-  has(key) {
-    return this.map.has(key);
-  }
+  /** The value, or undefined if absent or expired. */
   get(key) {
-    return this.map.get(key);
-  }
-  keys() {
-    return this.map.keys();
+    const row = this.q.get.get(this.ns, key);
+    const now = Date.now();
+    if (!row || (row.expires_at != null && row.expires_at <= now)) return undefined;
+    if (now - row.used_at > TOUCH_AFTER_MS) this.q.touch.run(now, this.ns, key);
+    return JSON.parse(row.value);
   }
 
-  set(key, value) {
-    this.map.delete(key);
-    this.map.set(key, value);
-    while (this.map.size > this.maxEntries) this.map.delete(this.map.keys().next().value);
-    this.scheduleSave();
+  has(key) {
+    return this.get(key) !== undefined;
+  }
+
+  /** ttlMs: how long the entry stays valid (default: forever). */
+  set(key, value, { ttlMs = null } = {}) {
+    const now = Date.now();
+    this.q.set.run(this.ns, key, JSON.stringify(value), ttlMs == null ? null : now + ttlMs, now);
+    if (++this.setsSinceEvict >= EVICT_EVERY_SETS) this.evict();
     return this;
   }
 
   delete(key) {
-    const existed = this.map.delete(key);
-    if (existed) this.scheduleSave();
-    return existed;
+    return this.q.delete.run(this.ns, key).changes > 0;
   }
 
-  scheduleSave() {
-    if (this.timer) return;
-    this.timer = setTimeout(() => this.save(), this.saveDelayMs);
-    this.timer.unref?.();
+  /** Number of valid (unexpired) entries. */
+  get size() {
+    return Number(this.q.size.get(this.ns, Date.now()).n);
   }
 
-  save() {
-    clearTimeout(this.timer);
-    this.timer = null;
-    try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify([...this.map]));
-      fs.renameSync(tmp, this.file);
-    } catch (err) {
-      console.error(`${new Date().toISOString()} store: could not save ${this.file}: ${err.message}`);
-    }
+  evict() {
+    this.setsSinceEvict = 0;
+    if (!Number.isFinite(this.maxEntries)) return;
+    const excess = Number(this.q.total.get(this.ns).n) - this.maxEntries;
+    if (excess > 0) this.q.evict.run(this.ns, this.ns, excess);
   }
 }
 
-/** Write all pending changes now (on shutdown). */
-export function flushStores() {
-  for (const s of stores) if (s.timer) s.save();
+/** Delete expired entries in all namespaces. Returns how many. */
+export function purgeExpired(db) {
+  return Number(db.prepare("DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at <= ?").run(Date.now()).changes);
+}
+
+/**
+ * One-time import of a JSON cache from before the SQLite switch ([[key, value], ...]).
+ * `add(key, value)` stores each entry; the file is then renamed to *.imported.
+ */
+export function importLegacyJson(file, add) {
+  let entries;
+  try {
+    entries = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return 0; // no legacy file
+  }
+  for (const [key, value] of entries) add(key, value);
+  fs.renameSync(file, `${file}.imported`);
+  return entries.length;
+}
+
+// ---------------------------------------------------------------- The app's database
+
+let appDb = null;
+
+/** The shared cache database in DATA_DIR (opened on first use). */
+export function cacheDb() {
+  appDb ??= openDatabase(path.join(config.dataDir, "cache.db"));
+  return appDb;
+}
+
+export const openStore = (ns, opts) => new Store(cacheDb(), ns, opts);
+
+export function closeCacheDb() {
+  appDb?.close();
+  appDb = null;
 }

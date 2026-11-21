@@ -212,16 +212,80 @@ test("resolver: no localisation lookups when names are comparable", async () => 
   assert.equal(lookups, 0);
 });
 
-test("PersistentMap saves, reloads, and evicts oldest entries", async () => {
-  const { PersistentMap } = await import("../src/store.js");
+test("Store: get/set/delete, expiry, size", async () => {
+  const { Store, openDatabase } = await import("../src/store.js");
+  const s = new Store(openDatabase(":memory:"), "t");
+  s.set("a", { x: [1, "two"] }).set("n", null).set("short", 1, { ttlMs: -1 }); // already expired
+  assert.deepEqual(s.get("a"), { x: [1, "two"] });
+  assert.equal(s.get("n"), null);
+  assert.equal(s.has("n"), true);
+  assert.equal(s.get("short"), undefined);
+  assert.equal(s.get("missing"), undefined);
+  assert.equal(s.size, 2);
+  assert.equal(s.delete("a"), true);
+  assert.equal(s.has("a"), false);
+});
+
+test("Store: namespaces are separate, LRU eviction keeps the most recently used", async () => {
+  const { Store, openDatabase } = await import("../src/store.js");
+  const db = openDatabase(":memory:");
+  const other = new Store(db, "other").set("k", "other");
+  const s = new Store(db, "t", { maxEntries: 2 });
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    s.set("old", 1);
+    now += 1000;
+    s.set("mid", 2);
+    now += 1000;
+    s.set("new", 3);
+    s.evict();
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(s.has("old"), false);
+  assert.deepEqual([s.get("mid"), s.get("new")], [2, 3]);
+  assert.equal(other.get("k"), "other");
+});
+
+test("Store: data persists in the file, and legacy JSON caches are imported once", async () => {
+  const { Store, openDatabase, importLegacyJson } = await import("../src/store.js");
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mvf-")), "s.json");
-  const a = new PersistentMap(file, { maxEntries: 2 });
-  a.set("x", 1).set("y", { z: [1] }).set("x", 3).set("w", 4); // "y" is now the oldest → evicted
-  a.save();
-  const b = new PersistentMap(file);
-  assert.deepEqual([...b.keys()], ["x", "w"]);
-  assert.equal(b.get("x"), 3);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mvf-"));
+  const legacy = path.join(dir, "old.json");
+  fs.writeFileSync(legacy, JSON.stringify([["a", 1], ["b", { c: 2 }]]));
+
+  const db1 = openDatabase(path.join(dir, "cache.db"));
+  const s1 = new Store(db1, "t");
+  assert.equal(importLegacyJson(legacy, (k, v) => s1.set(k, v)), 2);
+  assert.equal(importLegacyJson(legacy, (k, v) => s1.set(k, v)), 0); // renamed: not imported twice
+  assert.ok(fs.existsSync(`${legacy}.imported`));
+  db1.close();
+
+  const s2 = new Store(openDatabase(path.join(dir, "cache.db")), "t");
+  assert.deepEqual([s2.get("a"), s2.get("b")], [1, { c: 2 }]);
+});
+
+test("resolver cache: a hit costs no searches; misses get the short lifetime", async () => {
+  const { Store, openDatabase } = await import("../src/store.js");
+  const store = new Store(openDatabase(":memory:"), "matches");
+  const song = ytItem({ videoId: "S1", title: "Blinding Lights", artists: ["The Weeknd"], durationMs: 202000 });
+  let searches = 0;
+  const youtube = { search: async (q, filter) => (searches++, filter === "songs" ? [song] : []) };
+  const r = createResolver({ youtube, lookupTrack: noLookup, ttlHours: 24, store });
+  const hitTrack = () => ({ id: "hit", title: "Blinding Lights", artists: ["The Weeknd"], durationMs: 200040 });
+  const missTrack = () => ({ id: "miss", title: "Nothing Like It", artists: ["Nobody"], durationMs: 100000 });
+
+  assert.equal((await r.matchTrack(hitTrack(), opts)).length, 1);
+  const after = searches;
+  assert.equal((await r.matchTrack(hitTrack(), opts)).length, 1);
+  assert.equal(searches, after); // served from the cache
+
+  await r.matchTrack(missTrack(), opts);
+  const row = (key) => store.db.prepare("SELECT expires_at - used_at AS life FROM kv WHERE key LIKE ?").get(`${key}|%`);
+  assert.equal(row("hit").life, 24 * 3600_000);
+  assert.equal(row("miss").life, 3600_000);
 });

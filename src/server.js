@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import { createResolver, parseOptions } from "./resolve.js";
 import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
 import path from "node:path";
-import { PersistentMap, flushStores } from "./store.js";
+import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
 
@@ -11,7 +11,12 @@ const ROUTE = /^\/spotify\/(track|album|playlist)\/([A-Za-z0-9]{10,40})\/?$/;
 
 const youtube = new YouTubeManager(config.youtube);
 // Match results persist across restarts, so a restart costs no Spotify or YouTube requests.
-const matchStore = new PersistentMap(path.join(config.dataDir, "matches.json"), { maxEntries: config.cache.maxEntries });
+const matchStore = openStore("matches", { maxEntries: config.cache.maxEntries });
+importLegacyJson(path.join(config.dataDir, "matches.json"), (key, { expires, value }) => {
+  if (expires > Date.now()) matchStore.set(key, value, { ttlMs: expires - Date.now() });
+});
+purgeExpired(cacheDb());
+setInterval(() => purgeExpired(cacheDb()), 3600_000).unref();
 const resolver = createResolver({ youtube, lookupTrack, lookupLocalizedTrack, degraded: spotifyDegraded, store: matchStore, ...config.cache });
 
 async function handle(url) {
@@ -74,9 +79,12 @@ const server = http.createServer(async (req, res) => {
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
     log(`${sig} received, shutting down`);
-    flushStores();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 5000).unref();
+    const exit = () => {
+      closeCacheDb(); // checkpoints the WAL; SQLite stays consistent even if this is skipped
+      process.exit(0);
+    };
+    server.close(exit);
+    setTimeout(exit, 5000).unref();
   });
 }
 

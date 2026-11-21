@@ -28,10 +28,14 @@ docker run -d -p 8080:8080 -v mvfinder-data:/data \
   -e SPOTIFY_CLIENT_ID=... -e SPOTIFY_CLIENT_SECRET=... mvfinder
 ```
 
-Keep the `/data` volume. It holds the Spotify track cache, the match cache, the Spotify
-request counter and auto-updated versions of the YouTube library, so a restart costs no
-requests. The service also runs without Spotify credentials, using Spotify's public embed pages
-only. Matching is less accurate that way (no ISRCs).
+Keep the `/data` volume, so a restart costs no requests. It holds `cache.db`, a SQLite database
+with the Spotify track cache, the match cache and the Spotify request counter. SQLite is built
+into Node, so there's no extra dependency; only the entries a request needs are read, and
+expired or excess entries are pruned automatically. It also holds auto-updated versions of the
+YouTube library. Caches from older versions (`*.json`) are imported on first start and renamed
+to `*.imported`, after which they can be deleted. The service also runs without Spotify
+credentials, using Spotify's public embed pages only. Matching is less accurate that way (no
+ISRCs).
 
 ## API
 

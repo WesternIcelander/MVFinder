@@ -2,6 +2,7 @@
 
 import { scoreMatch, scriptLangs, searchQuery } from "./match.js";
 import { hasVideoMarker } from "./youtube.js";
+import { Store, openDatabase } from "./store.js";
 import { HttpError } from "./util.js";
 
 // With no music video, another official visual upload can stand in, if it's clearly the same song.
@@ -65,8 +66,9 @@ export function pick(scored, opts) {
   return picked;
 }
 
-export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = async () => null, degraded = () => false, ttlHours, maxEntries, store = new Map() }) {
-  const cache = store; // key -> { expires, value }; insertion order doubles as LRU order
+export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = async () => null, degraded = () => false, ttlHours, store = null }) {
+  // key -> matches. A Store (store.js): entries expire, and it drops the least recently used.
+  const cache = store ?? new Store(openDatabase(":memory:"), "matches");
   const ttl = ttlHours * 3600_000;
 
   // Album and embed-page track lists lack the ISRC, and the embed page can name things
@@ -179,11 +181,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     await enrich(track, aliases);
     const key = [track.id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
     const hit = cache.get(key);
-    if (hit && hit.expires > Date.now()) {
-      cache.delete(key);
-      cache.set(key, hit);
-      return hit.value;
-    }
+    if (hit !== undefined) return hit;
     // Missing ISRC only because the Spotify API was unavailable: recompute sooner.
     const lackedIsrc = !track.isrc && degraded();
     const value = await compute(track, opts, aliases);
@@ -191,8 +189,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
       // YouTube results vary between sessions, so don't hold on to a miss for long.
       // Likewise for results computed without the ISRC.
       const life = value.length && !lackedIsrc ? ttl : Math.min(ttl, MISS_TTL_MS);
-      cache.set(key, { expires: Date.now() + life, value });
-      while (cache.size > maxEntries) cache.delete(cache.keys().next().value);
+      cache.set(key, value, { ttlMs: life });
     }
     return value;
   }
