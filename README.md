@@ -57,6 +57,7 @@ ISRCs).
 | `all` | off | Return every candidate above the threshold, ranked, instead of the best song + best video |
 | `minConfidence` | `0.7` | Drop matches scoring below this (0–1) |
 | `explain` | off | Add a per-match scoring breakdown |
+| `single` | off | Accept only track links: an album or playlist link gets `422` without anything being fetched. For links pasted by end users, so one paste can't start a whole-playlist lookup |
 | `pretty` | off | Indented JSON |
 
 A track returns:
@@ -162,7 +163,7 @@ source couldn't be asked.
 #### Errors
 
 `{"error": {"status": 404, "source": "spotify", "message": "Spotify track … not found"}}`, with status
-`400` for bad parameters or ISRCs, `404` for an unknown route, Spotify item or ISRC, `502` when
+`400` for bad parameters or ISRCs, `422` for an album or playlist link with `single=1`, `404` for an unknown route, Spotify item or ISRC, `502` when
 Spotify or YouTube failed, and `503` when no working YouTube library is loaded yet (or, for
 `/isrc`, when the Spotify API can't be used).
 

@@ -16,7 +16,7 @@ const MISS_TTL_MS = 3600_000;
 
 const bool = (v) => v === "" || v === "1" || v === "true";
 
-/** Parse ?type=&all=&minConfidence=&explain= */
+/** Parse ?type=&all=&minConfidence=&explain=&single= */
 export function parseOptions(params) {
   const type = params.get("type") ?? "all";
   if (!["all", "song", "video"].includes(type)) throw new HttpError(400, "request", `type must be all, song or video (got "${type}")`);
@@ -27,6 +27,8 @@ export function parseOptions(params) {
     all: params.has("all") && bool(params.get("all")),
     minConfidence,
     explain: params.has("explain") && bool(params.get("explain")),
+    // Only tracks: refuse album and playlist links (e.g. ones pasted by an end user).
+    single: params.has("single") && bool(params.get("single")),
   };
 }
 

@@ -107,8 +107,9 @@ test("pickVersion honours spec and minimum release age", () => {
 
 test("parseOptions validates query parameters", () => {
   const p = (q) => parseOptions(new URLSearchParams(q));
-  assert.deepEqual(p(""), { type: "all", all: false, minConfidence: 0.7, explain: false });
-  assert.deepEqual(p("type=video&all&explain=1&minConfidence=0.5"), { type: "video", all: true, minConfidence: 0.5, explain: true });
+  assert.deepEqual(p(""), { type: "all", all: false, minConfidence: 0.7, explain: false, single: false });
+  assert.deepEqual(p("type=video&all&explain=1&minConfidence=0.5&single=1"), { type: "video", all: true, minConfidence: 0.5, explain: true, single: true });
+  assert.equal(p("single=0").single, false);
   assert.throws(() => p("type=podcast"), /type must be/);
   assert.throws(() => p("minConfidence=2"), /minConfidence/);
 });

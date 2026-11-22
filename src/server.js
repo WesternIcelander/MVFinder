@@ -44,6 +44,10 @@ async function handle(url) {
 
   const { service, type, id } = route;
   const opts = parseOptions(url.searchParams);
+  if (opts.single && type !== "track") {
+    // Checked before anything is fetched, so a refused link costs no requests.
+    throw new HttpError(422, "request", "This link is not for a single item");
+  }
   const item = await (service === "tidal" ? getTidalItem : getSpotifyItem)(type, id);
 
   if (type === "track") {
