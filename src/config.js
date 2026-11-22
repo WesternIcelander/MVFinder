@@ -17,6 +17,13 @@ export const config = {
     dailyRequestBudget: num(env.SPOTIFY_DAILY_REQUEST_BUDGET, 250),
     maxRequestsPerSecond: num(env.SPOTIFY_MAX_REQUESTS_PER_SECOND, 3),
   },
+  tidal: {
+    // Optional (developer.tidal.com). Without them, TIDAL data comes from its public web pages.
+    clientId: env.TIDAL_CLIENT_ID ?? "",
+    clientSecret: env.TIDAL_CLIENT_SECRET ?? "",
+    // The catalog the API answers from; availability differs by country.
+    countryCode: (env.TIDAL_COUNTRY_CODE || "US").toUpperCase(),
+  },
   youtube: {
     // Which youtubei.js versions to run: "latest", a major like "18", or an exact "18.3.0".
     packageSpec: env.YTJS_VERSION || "latest",

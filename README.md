@@ -25,7 +25,7 @@ The path is the link without `https://`: `https://open.spotify.com/playlist/33Yx
 ## Run it
 
 ```sh
-cp .env.example .env        # add SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET
+cp .env.example .env        # add SPOTIFY_CLIENT_ID / SECRET (and optionally TIDAL_CLIENT_ID / SECRET)
 docker compose up -d --build
 curl localhost:8080/open.spotify.com/track/6khnYqsyOTFq1SgpCi3Ucx
 ```
@@ -123,7 +123,7 @@ but only when it's clearly the same song (confidence ≥ 0.75).
 | Field | |
 |---|---|
 | `trackCount` | Tracks returned |
-| `totalTracks` | Tracks the service says the album or playlist has (`null` if unknown; TIDAL album pages don't say) |
+| `totalTracks` | Tracks the service says the album or playlist has (`null` if unknown; TIDAL album pages, used without the API, don't say) |
 | `truncated` | `true`/`false`, or `null` if unknown. See [Limitations](#limitations) |
 | `metadataSource` / `trackListSource` | `api`, `page` or `embed`: where the data came from |
 
@@ -172,7 +172,8 @@ Returns `200` when healthy and `503` when degraded. The body shows the YouTube l
 use, where it came from (`baseline` = baked into the image, `updated` = installed at runtime), and
 the results of the last update check and self-test. It also shows Spotify API usage:
 `requestsLast24h`, `dailyRequestBudget`, `rateLimitedUntil`, `cachedTracks`, and `apiUnavailable`
-(why the API is currently unused, if it is). Docker's `HEALTHCHECK` uses this endpoint.
+(why the API is currently unused, if it is). `tidal` shows its `mode` (`api` or `pages`) and
+`countryCode`. Docker's `HEALTHCHECK` uses this endpoint.
 Every response also includes an `X-YouTube-Client` header such as `youtubei.js@18.3.0`.
 
 ## How it works
@@ -196,7 +197,19 @@ app. So the service spends as few requests as possible:
 Typical cost: about 1 request per track never seen before, plus 1 for a token per hour. A
 45-track playlist costs about 46 requests the first time and 0 after that.
 
-**TIDAL** needs no account or key; everything comes from public pages:
+**TIDAL** uses its official API when `TIDAL_CLIENT_ID` and `TIDAL_CLIENT_SECRET` are set (a free
+app from [developer.tidal.com](https://developer.tidal.com); no TIDAL login involved):
+
+- One request returns a track, or an album or playlist with its first 20 tracks, each with its
+  ISRC and artists. Further tracks take 1 request per 20. A 50-track playlist costs 3 requests.
+- Titles get TIDAL's version, as TIDAL shows it: "Song" with version "Live" becomes "Song (Live)".
+- Answers come from the `TIDAL_COUNTRY_CODE` catalog (default `US`). Tracks unavailable there are
+  left out of lists, so `trackCount` can be lower than `totalTracks`.
+- If the API fails (or doesn't know the item, which can happen for region-locked items), the
+  service falls back to the public pages below and logs why. `metadataSource` and
+  `trackListSource` say which was used.
+
+Without the API keys, everything comes from public pages:
 
 - A track's page (`tidal.com/track/{id}`) has structured data with the title, artists, album,
   duration and ISRC.
@@ -204,7 +217,7 @@ Typical cost: about 1 request per track never seen before, plus 1 for a token pe
   track IDs, titles, artists and durations but no ISRCs. Each track's page is then fetched once
   for its ISRC and exact names, and cached on disk like Spotify tracks. The album or playlist
   page supplies its name, and a playlist's track count.
-- Page fetches run 4 at a time. TIDAL tracks never cost Spotify requests.
+- Page fetches run 4 at a time, as do API requests. TIDAL tracks never cost Spotify requests.
 
 **YouTube** search uses [youtubei.js](https://github.com/LuanRT/YouTube.js), an unofficial
 client for YouTube's internal API. Each result carries YouTube's own classification: audio
@@ -273,6 +286,8 @@ library itself:
 | `YTJS_UPDATE_INTERVAL_HOURS` | `6` | How often to self-test and check for updates |
 | `YT_CONCURRENCY` | `4` | Concurrent YouTube searches, across all requests |
 | `YT_LOCATION` | `US` | YouTube region |
+| `TIDAL_CLIENT_ID`, `TIDAL_CLIENT_SECRET` | — | Optional, from [developer.tidal.com](https://developer.tidal.com). Without them, TIDAL's public pages are read |
+| `TIDAL_COUNTRY_CODE` | `US` | The TIDAL API catalog to use; availability differs by country |
 | `ISRC_FALLBACKS` | `deezer,musicbrainz` | Sources `/isrc` asks after Spotify, in order. Empty to use Spotify only |
 | `MUSICBRAINZ_USER_AGENT` | `isrc-lookup/1.0` | MusicBrainz asks for `AppName/version ( contact-url-or-email )` |
 | `CACHE_TTL_HOURS` / `CACHE_MAX_ENTRIES` | `24` / `20000` | Per-track match cache (on disk) |
@@ -285,15 +300,16 @@ version baked into the image.
 
 - **Spotify albums and playlists are capped at 100 tracks.** The embed page lists at most 100
   tracks; `totalTracks` and `truncated` say whether the list was cut off (`null` if the total
-  couldn't be read). Whether TIDAL's embed has a cap is untested (playlists of 50 come back whole);
-  for TIDAL playlists, `truncated` would show it.
+  couldn't be read). TIDAL lists from the API are complete (up to 10,000 tracks). Whether TIDAL's
+  embed (used without the API) has a cap is untested; for TIDAL playlists, `truncated` would show it.
 - **Spotify Development Mode** apps need the app owner to have Spotify Premium (since Feb 2026),
   and get a small daily request allowance (see [How it works](#how-it-works)).
 - **YouTube is unofficial.** If YouTube breaks youtubei.js, `/health` turns `503` and searches
   return `502` until a fixed release is published and passes the self-test. Spotify's embed
   page is also unofficial. The Web API is the primary source for single tracks and for ISRCs.
-  TIDAL support reads TIDAL's public web pages, which can change without notice. If they do,
-  TIDAL requests fail with a "page layout may have changed" error until the parsing is updated.
+  Without API keys, TIDAL support reads TIDAL's public web pages, which can change without notice.
+  If they do, TIDAL requests fail with a "page layout may have changed" error until the parsing is
+  updated.
 - The first request for a playlist takes roughly 0.3–0.7 s per track. Spotify lookups are paced
   at 3 per second, and YouTube searches run 4 at a time. That's about 15–30 s for 45 new tracks;
   cached tracks return almost instantly.

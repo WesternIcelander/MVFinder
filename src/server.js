@@ -6,7 +6,7 @@ import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spo
 import path from "node:path";
 import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
 import { NOT_FOUND_MESSAGE, parseRoute, requestUrl } from "./routes.js";
-import { getTidalItem, lookupTidalTrack } from "./tidal.js";
+import { getTidalItem, lookupTidalTrack, tidalStatus } from "./tidal.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
 
@@ -28,7 +28,7 @@ async function handle(url) {
 
   if (route.route === "health") {
     const yt = youtube.health();
-    return [yt.ok ? 200 : 503, { status: yt.ok ? "ok" : "degraded", youtube: yt, spotify: spotifyStatus(), cacheEntries: resolver.cacheSize() }];
+    return [yt.ok ? 200 : 503, { status: yt.ok ? "ok" : "degraded", youtube: yt, spotify: spotifyStatus(), tidal: tidalStatus(), cacheEntries: resolver.cacheSize() }];
   }
 
   if (route.route === "isrc") {
