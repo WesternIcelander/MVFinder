@@ -5,12 +5,9 @@ import { lookupIsrcSource, normalizeIsrc } from "./isrc.js";
 import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spotifyStatus } from "./spotify.js";
 import path from "node:path";
 import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
+import { NOT_FOUND_MESSAGE, parseRoute, requestUrl } from "./routes.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
-
-const ROUTE = /^\/spotify\/(track|album|playlist)\/([A-Za-z0-9]{10,40})\/?$/;
-const ISRC_ROUTE = /^\/isrc\/([^/]+)\/?$/;
-const NOT_FOUND_MESSAGE = "Not found. Use GET /spotify/{track|album|playlist}/{id} or /isrc/{isrc}";
 
 const youtube = new YouTubeManager(config.youtube);
 // Match results persist across restarts, so a restart costs no Spotify or YouTube requests.
@@ -23,20 +20,16 @@ setInterval(() => purgeExpired(cacheDb()), 3600_000).unref();
 const resolver = createResolver({ youtube, lookupTrack, lookupLocalizedTrack, degraded: spotifyDegraded, store: matchStore, ...config.cache });
 
 async function handle(url) {
-  if (url.pathname === "/health") {
+  const route = parseRoute(url.pathname);
+  if (!route) throw new HttpError(404, "request", NOT_FOUND_MESSAGE);
+
+  if (route.route === "health") {
     const yt = youtube.health();
     return [yt.ok ? 200 : 503, { status: yt.ok ? "ok" : "degraded", youtube: yt, spotify: spotifyStatus(), cacheEntries: resolver.cacheSize() }];
   }
 
-  const isrcRoute = url.pathname.match(ISRC_ROUTE);
-  if (isrcRoute) {
-    let raw;
-    try {
-      raw = decodeURIComponent(isrcRoute[1]);
-    } catch {
-      raw = isrcRoute[1];
-    }
-    const isrc = normalizeIsrc(raw);
+  if (route.route === "isrc") {
+    const isrc = normalizeIsrc(route.isrc);
     const opts = parseOptions(url.searchParams);
     // Spotify, Deezer or MusicBrainz supplies the title, artists and duration that YouTube results
     // are checked against. (YouTube's own ISRC search can't stand in: for ISRCs it doesn't know,
@@ -46,9 +39,7 @@ async function handle(url) {
     return [200, { source, matches: await resolver.matchTrack(track, opts) }];
   }
 
-  const m = url.pathname.match(ROUTE);
-  if (!m) throw new HttpError(404, "request", NOT_FOUND_MESSAGE);
-  const [, type, id] = m;
+  const { type, id } = route;
   const opts = parseOptions(url.searchParams);
   const item = await getSpotifyItem(type, id);
 
@@ -72,7 +63,7 @@ async function handle(url) {
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
-  const url = new URL(req.url, "http://localhost");
+  const url = requestUrl(req.url);
   let status;
   let body;
   if (req.method !== "GET" && req.method !== "HEAD") {

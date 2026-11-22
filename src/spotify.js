@@ -337,7 +337,7 @@ export async function lookupIsrc(isrc) {
           trackStore.set(key, { notFound: true }, { ttlMs: NOT_FOUND_TTL_MS });
           return null;
         }
-        if (!isCached(track.id)) trackStore.set(track.id, track); // later /spotify/track lookups are free
+        if (!isCached(track.id)) trackStore.set(track.id, track); // later lookups of this track are free
         trackStore.set(key, { id: track.id });
         return track;
       })

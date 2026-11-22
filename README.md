@@ -4,21 +4,22 @@ An HTTP API that takes a Spotify track, album or playlist (or an ISRC) and retur
 **YouTube Music song** (audio track) and **YouTube music video** for each track, as JSON.
 
 ```
-GET /spotify/track/6khnYqsyOTFq1SgpCi3Ucx
-GET /spotify/album/4m2880jivSbbyEGAKfITCa
-GET /spotify/playlist/33YxQ9R7gaOhNOjA1nKph1
+GET /open.spotify.com/track/6khnYqsyOTFq1SgpCi3Ucx
+GET /open.spotify.com/album/4m2880jivSbbyEGAKfITCa
+GET /open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1
 GET /isrc/JP92Q2503558
 ```
 
-The path mirrors the Spotify URL: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
-`/spotify/playlist/33YxQ9R7gaOhNOjA1nKph1`.
+The path is the Spotify link without `https://`: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
+`/open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1`. Share links work as copied: share parameters
+(`?si=…`), language segments (`/intl-de/`), `embed/` links and a left-in `https://` are all accepted.
 
 ## Run it
 
 ```sh
 cp .env.example .env        # add SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET
 docker compose up -d --build
-curl localhost:8080/spotify/track/6khnYqsyOTFq1SgpCi3Ucx
+curl localhost:8080/open.spotify.com/track/6khnYqsyOTFq1SgpCi3Ucx
 ```
 
 Or without compose:
@@ -40,7 +41,7 @@ ISRCs).
 
 ## API
 
-### `GET /spotify/{track|album|playlist}/{id}`
+### `GET /open.spotify.com/{track|album|playlist}/{id}`
 
 | Query parameter | Default | |
 |---|---|---|
