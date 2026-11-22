@@ -6,6 +6,7 @@ import { getSpotifyItem, lookupLocalizedTrack, lookupTrack, spotifyDegraded, spo
 import path from "node:path";
 import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from "./store.js";
 import { NOT_FOUND_MESSAGE, parseRoute, requestUrl } from "./routes.js";
+import { getTidalItem, lookupTidalTrack } from "./tidal.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
 
@@ -17,7 +18,9 @@ importLegacyJson(path.join(config.dataDir, "matches.json"), (key, { expires, val
 });
 purgeExpired(cacheDb());
 setInterval(() => purgeExpired(cacheDb()), 3600_000).unref();
-const resolver = createResolver({ youtube, lookupTrack, lookupLocalizedTrack, degraded: spotifyDegraded, store: matchStore, ...config.cache });
+// A list's track without an ISRC gets its full record from its own service.
+const lookupFull = (track) => (track.service === "tidal" ? lookupTidalTrack(track.id) : lookupTrack(track.id));
+const resolver = createResolver({ youtube, lookupTrack: lookupFull, lookupLocalizedTrack, degraded: spotifyDegraded, store: matchStore, ...config.cache });
 
 async function handle(url) {
   const route = parseRoute(url.pathname);
@@ -39,9 +42,9 @@ async function handle(url) {
     return [200, { source, matches: await resolver.matchTrack(track, opts) }];
   }
 
-  const { type, id } = route;
+  const { service, type, id } = route;
   const opts = parseOptions(url.searchParams);
-  const item = await getSpotifyItem(type, id);
+  const item = await (service === "tidal" ? getTidalItem : getSpotifyItem)(type, id);
 
   if (type === "track") {
     return [200, { source: item.source, matches: await resolver.matchTrack(item.source, opts) }];

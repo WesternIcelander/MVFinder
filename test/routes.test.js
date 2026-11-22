@@ -6,7 +6,7 @@ const route = (raw) => parseRoute(requestUrl(raw).pathname);
 const ID = "6khnYqsyOTFq1SgpCi3Ucx";
 
 test("a Spotify link minus https:// is the path, leniently", () => {
-  const want = { route: "spotify", type: "track", id: ID };
+  const want = { route: "item", service: "spotify", type: "track", id: ID };
   for (const p of [
     `/open.spotify.com/track/${ID}`,
     `/open.spotify.com/track/${ID}/`,
@@ -22,8 +22,8 @@ test("a Spotify link minus https:// is the path, leniently", () => {
   ]) {
     assert.deepEqual(route(p), want, p);
   }
-  assert.deepEqual(route("/open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1"), { route: "spotify", type: "playlist", id: "33YxQ9R7gaOhNOjA1nKph1" });
-  assert.deepEqual(route("/open.spotify.com/album/4m2880jivSbbyEGAKfITCa"), { route: "spotify", type: "album", id: "4m2880jivSbbyEGAKfITCa" });
+  assert.deepEqual(route("/open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1"), { route: "item", service: "spotify", type: "playlist", id: "33YxQ9R7gaOhNOjA1nKph1" });
+  assert.deepEqual(route("/open.spotify.com/album/4m2880jivSbbyEGAKfITCa"), { route: "item", service: "spotify", type: "album", id: "4m2880jivSbbyEGAKfITCa" });
 });
 
 test("other paths", () => {
@@ -34,4 +34,29 @@ test("other paths", () => {
     assert.equal(route(p), null, p);
   }
   assert.equal(requestUrl(`/open.spotify.com/track/${ID}?si=x&type=song`).searchParams.get("type"), "song");
+});
+
+test("TIDAL links, in their variants", () => {
+  const track = { route: "item", service: "tidal", type: "track", id: "251380837" };
+  for (const p of [
+    "/tidal.com/track/251380837",
+    "/tidal.com/browse/track/251380837",
+    "/tidal.com/browse/track/251380837/u",
+    "/tidal.com/browse/track/251380837?u",
+    "/listen.tidal.com/track/251380837",
+    "/www.tidal.com/track/251380837",
+    "/https://tidal.com/browse/track/251380837",
+    "/listen.tidal.com/album/251380836/track/251380837",
+  ]) {
+    assert.deepEqual(route(p), track, p);
+  }
+  const album = { route: "item", service: "tidal", type: "album", id: "251380836" };
+  assert.deepEqual(route("/tidal.com/album/251380836"), album);
+  assert.deepEqual(route("/tidal.com/album/renaissance/251380836"), album);
+  assert.deepEqual(route("/listen.tidal.com/album/251380836/"), album);
+  const uuid = "36ea71a8-445e-41a4-82ab-6628c581535d";
+  assert.deepEqual(route(`/tidal.com/browse/playlist/${uuid.toUpperCase()}`), { route: "item", service: "tidal", type: "playlist", id: uuid });
+  for (const p of ["/tidal.com/artist/1566", "/tidal.com/playlist/123", `/tidal.com/track/${uuid}`, "/tidal.com.evil/track/1", "/eviltidal.com/track/1"]) {
+    assert.equal(route(p), null, p);
+  }
 });

@@ -1,4 +1,4 @@
-// Turns one track (from Spotify, or an ISRC's reference record) into ranked YouTube matches, with a cache.
+// Turns one track (from Spotify, TIDAL, or an ISRC's reference record) into ranked YouTube matches, with a cache.
 
 import { scoreMatch, scriptLangs, searchQuery } from "./match.js";
 import { hasVideoMarker } from "./youtube.js";
@@ -76,7 +76,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
   // (it's also what the response shows) and keep the differing names as aliases.
   async function enrich(track, aliases) {
     if (track.isrc) return;
-    const full = await lookupTrack(track.id);
+    const full = await lookupTrack(track); // the full record from the track's own service
     if (!full) return;
     if (full.title !== track.title) aliases.titles.push(track.title);
     if (full.artists[0] && full.artists[0] !== track.artists[0]) aliases.artists.push(track.artists[0]);
@@ -188,7 +188,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     // Before the cache check, so the response shows the API record (ISRC etc.) either way.
     const aliases = { titles: [], artists: [] };
     await enrich(track, aliases);
-    // IDs from other services (an ISRC's Deezer or MusicBrainz record) get a prefix.
+    // IDs from other services (TIDAL, or an ISRC's Deezer or MusicBrainz record) get a prefix.
     const id = track.service && track.service !== "spotify" ? `${track.service}:${track.id}` : track.id;
     const key = [id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
     const hit = cache.get(key);

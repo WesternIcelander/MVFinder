@@ -1,18 +1,26 @@
 # MVFinder
 
-An HTTP API that takes a Spotify track, album or playlist (or an ISRC) and returns the matching
+An HTTP API that takes a Spotify or TIDAL track, album or playlist (or an ISRC) and returns the matching
 **YouTube Music song** (audio track) and **YouTube music video** for each track, as JSON.
 
 ```
 GET /open.spotify.com/track/6khnYqsyOTFq1SgpCi3Ucx
 GET /open.spotify.com/album/4m2880jivSbbyEGAKfITCa
 GET /open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1
+GET /tidal.com/track/251380837
+GET /tidal.com/album/251380836
+GET /tidal.com/playlist/36ea71a8-445e-41a4-82ab-6628c581535d
 GET /isrc/JP92Q2503558
 ```
 
-The path is the Spotify link without `https://`: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
-`/open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1`. Share links work as copied: share parameters
-(`?si=…`), language segments (`/intl-de/`), `embed/` links and a left-in `https://` are all accepted.
+The path is the link without `https://`: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
+`/open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1`. Share links work as copied, and a left-in
+`https://` is fine too:
+
+- **Spotify:** share parameters (`?si=…`), language segments (`/intl-de/`) and `embed/` links.
+- **TIDAL:** `tidal.com`, `listen.tidal.com` and `www.tidal.com`; `/browse/` links; share links ending
+  in `/u` or `?u`; album links with a name (`/album/renaissance/251380836`); and a track within an
+  album (`/album/251380836/track/251380837`).
 
 ## Run it
 
@@ -41,7 +49,7 @@ ISRCs).
 
 ## API
 
-### `GET /open.spotify.com/{track|album|playlist}/{id}`
+### `GET /open.spotify.com/{track|album|playlist}/{id}` and `GET /tidal.com/{track|album|playlist}/{id}`
 
 | Query parameter | Default | |
 |---|---|---|
@@ -115,9 +123,9 @@ but only when it's clearly the same song (confidence ≥ 0.75).
 | Field | |
 |---|---|
 | `trackCount` | Tracks returned |
-| `totalTracks` | Tracks Spotify says the album or playlist has (`null` if unknown) |
+| `totalTracks` | Tracks the service says the album or playlist has (`null` if unknown; TIDAL album pages don't say) |
 | `truncated` | `true`/`false`, or `null` if unknown. See [Limitations](#limitations) |
-| `metadataSource` / `trackListSource` | `api` or `embed`: where the data came from |
+| `metadataSource` / `trackListSource` | `api`, `page` or `embed`: where the data came from |
 
 ### `GET /isrc/{isrc}`
 
@@ -187,6 +195,16 @@ app. So the service spends as few requests as possible:
 
 Typical cost: about 1 request per track never seen before, plus 1 for a token per hour. A
 45-track playlist costs about 46 requests the first time and 0 after that.
+
+**TIDAL** needs no account or key; everything comes from public pages:
+
+- A track's page (`tidal.com/track/{id}`) has structured data with the title, artists, album,
+  duration and ISRC.
+- Album and playlist track lists come from the embed player (`embed.tidal.com`), which gives
+  track IDs, titles, artists and durations but no ISRCs. Each track's page is then fetched once
+  for its ISRC and exact names, and cached on disk like Spotify tracks. The album or playlist
+  page supplies its name, and a playlist's track count.
+- Page fetches run 4 at a time. TIDAL tracks never cost Spotify requests.
 
 **YouTube** search uses [youtubei.js](https://github.com/LuanRT/YouTube.js), an unofficial
 client for YouTube's internal API. Each result carries YouTube's own classification: audio
@@ -265,14 +283,17 @@ version baked into the image.
 
 ## Limitations
 
-- **Albums and playlists are capped at 100 tracks.** The embed page lists at most 100 tracks;
-  `totalTracks` and `truncated` say whether the list was cut off (`null` if the total couldn't be
-  read).
+- **Spotify albums and playlists are capped at 100 tracks.** The embed page lists at most 100
+  tracks; `totalTracks` and `truncated` say whether the list was cut off (`null` if the total
+  couldn't be read). Whether TIDAL's embed has a cap is untested (playlists of 50 come back whole);
+  for TIDAL playlists, `truncated` would show it.
 - **Spotify Development Mode** apps need the app owner to have Spotify Premium (since Feb 2026),
   and get a small daily request allowance (see [How it works](#how-it-works)).
 - **YouTube is unofficial.** If YouTube breaks youtubei.js, `/health` turns `503` and searches
   return `502` until a fixed release is published and passes the self-test. Spotify's embed
   page is also unofficial. The Web API is the primary source for single tracks and for ISRCs.
+  TIDAL support reads TIDAL's public web pages, which can change without notice. If they do,
+  TIDAL requests fail with a "page layout may have changed" error until the parsing is updated.
 - The first request for a playlist takes roughly 0.3–0.7 s per track. Spotify lookups are paced
   at 3 per second, and YouTube searches run 4 at a time. That's about 15–30 s for 45 new tracks;
   cached tracks return almost instantly.
