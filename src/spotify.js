@@ -1,7 +1,8 @@
 // Spotify metadata, spending as few Web API requests as possible.
 //
-// Development Mode apps get a small daily allowance (roughly 750 requests a day, which may be
-// shared with other tools using the same app), and overshooting can mean hours of HTTP 429. So:
+// Development Mode apps get a small daily allowance (unpublished and subject to change; once
+// observed at roughly 750 requests a day), which may be shared with other tools using the same
+// app, and overshooting can mean hours of HTTP 429. So:
 //  - album and playlist track lists come from the public embed page, which costs no API requests
 //    (since Feb 2026 the API won't list playlists the app doesn't own anyway);
 //  - the API is only used per track (for the ISRC and canonical names), at most once per track:

@@ -12,8 +12,9 @@ export const config = {
   spotify: {
     clientId: env.SPOTIFY_CLIENT_ID ?? "",
     clientSecret: env.SPOTIFY_CLIENT_SECRET ?? "",
-    // Development Mode apps get roughly 750 requests a day, possibly shared with other tools on
-    // the same app; past this many in 24 h the service stops using the API (no ISRCs).
+    // Development Mode apps get a small, unpublished daily allowance (once observed at roughly 750
+    // requests), possibly shared with other tools on the same app; past this many in 24 h the
+    // service stops using the API (no ISRCs).
     dailyRequestBudget: num(env.SPOTIFY_DAILY_REQUEST_BUDGET, 250),
     maxRequestsPerSecond: num(env.SPOTIFY_MAX_REQUESTS_PER_SECOND, 3),
   },

@@ -178,9 +178,10 @@ Every response also includes an `X-YouTube-Client` header such as `youtubei.js@1
 
 ## How it works
 
-**Spotify.** Development Mode apps get roughly 750 Web API requests a day. Going over can
-mean hours of `429` responses, and the allowance is shared with any other tool using the same
-app. So the service spends as few requests as possible:
+**Spotify.** Development Mode apps get a small daily Web API allowance. Spotify doesn't publish
+the number and it can change; in one week of use the limit kicked in at roughly 750 requests a
+day. Going over can mean hours of `429` responses, and the allowance is shared with any other
+tool using the same app. So the service spends as few requests as possible:
 
 - **Album and playlist track lists come from the public embed page, which costs no API
   requests.** Since February 2026 the API won't list playlists your app doesn't own anyway. For
