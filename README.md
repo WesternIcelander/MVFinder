@@ -82,6 +82,10 @@ A track returns:
       "url": "https://music.youtube.com/watch?v=b31SNbUxVTU",
       "youtubeUrl": "https://www.youtube.com/watch?v=b31SNbUxVTU",
       "youtubeMusicUrl": "https://music.youtube.com/watch?v=b31SNbUxVTU",
+      "thumbnails": [
+        { "url": "https://lh3.googleusercontent.com/…=w544-h544-l90-rj", "width": 544, "height": 544 },
+        { "url": "https://lh3.googleusercontent.com/…=s0", "width": null, "height": null }
+      ],
       "confidence": 1, "matchedBy": "isrc"
     },
     {
@@ -92,6 +96,10 @@ A track returns:
       "url": "https://www.youtube.com/watch?v=9OBmDkSlkrQ",
       "youtubeUrl": "https://www.youtube.com/watch?v=9OBmDkSlkrQ",
       "youtubeMusicUrl": "https://music.youtube.com/watch?v=9OBmDkSlkrQ",
+      "thumbnails": [
+        { "url": "https://i.ytimg.com/vi/9OBmDkSlkrQ/maxresdefault.jpg", "width": 1280, "height": 720 },
+        { "url": "https://i.ytimg.com/vi/9OBmDkSlkrQ/hqdefault.jpg", "width": 480, "height": 360 }
+      ],
       "confidence": 0.89, "matchedBy": "search"
     }
   ]
@@ -104,6 +112,17 @@ If one track's search fails, that track gets an `"error"` and the rest still ret
 `url` points to each match type's natural home (YouTube Music for songs, YouTube for videos),
 and both URLs are always included. `matchedBy` is `isrc` for a match on the recording's ISRC
 code and `search` for one found by searching for artist and title.
+
+`thumbnails` lists images for the match, the default choice first:
+
+- **Songs:** the album art at 544×544 (the size YouTube Music's player shows), then the
+  original upload, whose size isn't known without downloading it (`null`; it varies by album).
+  The size is set by the URL's ending (`=w1200-h1200-l90-rj` works too); larger than the original
+  returns the original.
+- **Videos:** `maxresdefault.jpg` (1280×720) if the video has one, then `hqdefault.jpg`
+  (480×360, letterboxed to 4:3), which every video has. Whether `maxresdefault` exists is
+  checked with one `HEAD` request to YouTube's image server when the match is first computed;
+  the answer is cached with the match. Old and low-resolution uploads often lack it.
 
 #### Match types
 

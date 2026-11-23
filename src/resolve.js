@@ -3,6 +3,7 @@
 import { scoreMatch, scriptLangs, searchQuery } from "./match.js";
 import { hasVideoMarker } from "./youtube.js";
 import { Store, openDatabase } from "./store.js";
+import { thumbnailsFor } from "./thumbnails.js";
 import { HttpError } from "./util.js";
 
 // With no music video, another official visual upload can stand in, if it's clearly the same song.
@@ -13,6 +14,8 @@ const ISRC_SESSIONS = 5;
 // Languages we can ask Spotify for when YouTube shows names in their script.
 const LOCALIZE_LANGS = ["ja", "ko", "zh"];
 const MISS_TTL_MS = 3600_000;
+// Part of the cache key: bump when the shape of cached matches changes (2: thumbnails).
+const CACHE_VERSION = 2;
 
 const bool = (v) => v === "" || v === "1" || v === "true";
 
@@ -32,7 +35,7 @@ export function parseOptions(params) {
   };
 }
 
-function formatMatch({ yt, score, matchedBy }, explain) {
+async function formatMatch({ yt, score, matchedBy }, explain, hasMaxresThumbnail) {
   const youtubeUrl = `https://www.youtube.com/watch?v=${yt.videoId}`;
   const youtubeMusicUrl = `https://music.youtube.com/watch?v=${yt.videoId}`;
   return {
@@ -45,6 +48,7 @@ function formatMatch({ yt, score, matchedBy }, explain) {
     url: yt.kind === "song" ? youtubeMusicUrl : youtubeUrl,
     youtubeUrl,
     youtubeMusicUrl,
+    thumbnails: await thumbnailsFor(yt, hasMaxresThumbnail),
     confidence: score.confidence,
     matchedBy,
     ...(explain ? { scoring: { ...score.breakdown, youtubeVideoType: yt.videoType } } : {}),
@@ -68,7 +72,7 @@ export function pick(scored, opts) {
   return picked;
 }
 
-export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = async () => null, degraded = () => false, ttlHours, store = null }) {
+export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = async () => null, degraded = () => false, ttlHours, store = null, hasMaxresThumbnail = async () => false }) {
   // key -> matches. A Store (store.js): entries expire, and it drops the least recently used.
   const cache = store ?? new Store(openDatabase(":memory:"), "matches");
   const ttl = ttlHours * 3600_000;
@@ -183,7 +187,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
       if (score.confidence >= opts.minConfidence) scored.push({ yt, score, matchedBy: "search" });
     }
     scored.sort((a, b) => b.score.confidence - a.score.confidence); // stable: the ISRC hit wins ties
-    return pick(scored, opts).map((s) => formatMatch(s, opts.explain));
+    return Promise.all(pick(scored, opts).map((s) => formatMatch(s, opts.explain, hasMaxresThumbnail)));
   }
 
   async function matchTrack(track, opts) {
@@ -192,7 +196,7 @@ export function createResolver({ youtube, lookupTrack, lookupLocalizedTrack = as
     await enrich(track, aliases);
     // IDs from other services (TIDAL, or an ISRC's Deezer or MusicBrainz record) get a prefix.
     const id = track.service && track.service !== "spotify" ? `${track.service}:${track.id}` : track.id;
-    const key = [id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
+    const key = [CACHE_VERSION, id ?? `${track.artists.join(",")}|${track.title}`, opts.type, opts.all, opts.minConfidence, opts.explain].join("|");
     const hit = cache.get(key);
     if (hit !== undefined) return hit;
     // Missing ISRC only because the Spotify API was unavailable: recompute sooner.

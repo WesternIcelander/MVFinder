@@ -69,7 +69,15 @@ export function toResult(item) {
     artists,
     album: item.album?.name ?? null,
     durationMs: item.duration?.seconds != null ? item.duration.seconds * 1000 : null,
+    thumbnail: largestThumbnail(item.thumbnail?.contents ?? item.thumbnails),
   };
+}
+
+/** The largest of a result's thumbnails, as { url, width, height }, or null. */
+function largestThumbnail(list) {
+  if (!Array.isArray(list)) return null;
+  const best = list.filter((t) => t?.url).sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
+  return best ? { url: best.url, width: best.width ?? null, height: best.height ?? null } : null;
 }
 
 export class Client {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { coreTitle, scoreMatch, scriptLangs } from "../src/match.js";
 import { Client, refineKind, toResult } from "../src/youtube.js";
 import { pickVersion } from "../src/ytjs-package.js";
+import { thumbnailsFor } from "../src/thumbnails.js";
 import { createResolver, parseOptions, pick } from "../src/resolve.js";
 
 test("coreTitle strips Spotify suffixes", () => {
@@ -33,6 +34,7 @@ test("toResult reads youtubei.js song and video items", () => {
     album: { name: "After Hours" },
     duration: { seconds: 202 },
     overlay: { content: { endpoint: endpoint("MUSIC_VIDEO_TYPE_ATV") } },
+    thumbnail: { contents: [{ url: "https://lh3.googleusercontent.com/a=w60-h60-l90-rj", width: 60, height: 60 }, { url: "https://lh3.googleusercontent.com/a=w120-h120-l90-rj", width: 120, height: 120 }] },
   });
   assert.deepEqual(song, {
     videoId: "J7p4bzqLvCw",
@@ -42,6 +44,7 @@ test("toResult reads youtubei.js song and video items", () => {
     artists: ["The Weeknd"],
     album: "After Hours",
     durationMs: 202000,
+    thumbnail: { url: "https://lh3.googleusercontent.com/a=w120-h120-l90-rj", width: 120, height: 120 }, // the largest
   });
   const video = toResult({
     id: "4NRXx6U8ABQ",
@@ -51,8 +54,25 @@ test("toResult reads youtubei.js song and video items", () => {
     flex_columns: [{ title: { endpoint: endpoint("MUSIC_VIDEO_TYPE_OMV") } }],
   });
   assert.equal(video.kind, "music_video");
+  assert.equal(video.thumbnail, null);
   assert.deepEqual(video.artists, ["The Weeknd"]);
   assert.equal(toResult({ title: "no id" }), null);
+});
+
+test("thumbnails: album art at 544 then original; video stills maxres (if it exists) then hq", async () => {
+  const art = { url: "https://yt3.googleusercontent.com/abc=w120-h120-l90-rj", width: 120, height: 120 };
+  assert.deepEqual(await thumbnailsFor({ videoId: "s", thumbnail: art }, async () => assert.fail("no HEAD for album art")), [
+    { url: "https://yt3.googleusercontent.com/abc=w544-h544-l90-rj", width: 544, height: 544 },
+    { url: "https://yt3.googleusercontent.com/abc=s0", width: null, height: null },
+  ]);
+  const still = { url: "https://i.ytimg.com/vi/v1/hqdefault.jpg?sqp=x", width: 400, height: 225 };
+  const hq = { url: "https://i.ytimg.com/vi/v1/hqdefault.jpg", width: 480, height: 360 };
+  assert.deepEqual(await thumbnailsFor({ videoId: "v1", thumbnail: still }, async (id) => id === "v1"), [
+    { url: "https://i.ytimg.com/vi/v1/maxresdefault.jpg", width: 1280, height: 720 },
+    hq,
+  ]);
+  assert.deepEqual(await thumbnailsFor({ videoId: "v1", thumbnail: still }, async () => false), [hq]);
+  assert.deepEqual(await thumbnailsFor({ videoId: "v1", thumbnail: null }, async () => false), [hq]); // built from the ID
 });
 
 const track = { title: "Blinding Lights", artists: ["The Weeknd"], durationMs: 200040 };
@@ -286,7 +306,7 @@ test("resolver cache: a hit costs no searches; misses get the short lifetime", a
   assert.equal(searches, after); // served from the cache
 
   await r.matchTrack(missTrack(), opts);
-  const row = (key) => store.db.prepare("SELECT expires_at - used_at AS life FROM kv WHERE key LIKE ?").get(`${key}|%`);
+  const row = (key) => store.db.prepare("SELECT expires_at - used_at AS life FROM kv WHERE key LIKE ?").get(`%|${key}|%`); // after the cache version
   assert.equal(row("hit").life, 24 * 3600_000);
   assert.equal(row("miss").life, 3600_000);
 });
