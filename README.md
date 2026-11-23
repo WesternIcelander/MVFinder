@@ -84,7 +84,7 @@ A track returns:
       "youtubeMusicUrl": "https://music.youtube.com/watch?v=b31SNbUxVTU",
       "thumbnails": [
         { "url": "https://lh3.googleusercontent.com/…=w544-h544-l90-rj", "width": 544, "height": 544 },
-        { "url": "https://lh3.googleusercontent.com/…=s0", "width": null, "height": null }
+        { "url": "https://lh3.googleusercontent.com/…=s0" }
       ],
       "confidence": 1, "matchedBy": "isrc"
     },
@@ -116,7 +116,8 @@ code and `search` for one found by searching for artist and title.
 `thumbnails` lists images for the match, the default choice first:
 
 - **Songs:** the album art at 544×544 (the size YouTube Music's player shows), then the
-  original upload, whose size isn't known without downloading it (`null`; it varies by album).
+  original upload, whose size isn't known without downloading it, so it has no `width` or
+  `height` (it varies by album).
   The size is set by the URL's ending (`=w1200-h1200-l90-rj` works too); larger than the original
   returns the original.
 - **Videos:** `maxresdefault.jpg` (1280×720) if the video has one, then `hqdefault.jpg`

@@ -1,7 +1,9 @@
 // Thumbnails for a match, as a list of { url, width, height } (first is the default choice).
+// width and height are left out when unknown.
 //
 // - YouTube Music album art (*.googleusercontent.com) is resized by its URL suffix ("=w120-h120-…"):
-//   544×544 (what YouTube Music's player shows), then the original upload ("=s0", size unknown).
+//   544×544 (what YouTube Music's player shows), then the original upload ("=s0", size unknown,
+//   so no width or height).
 // - Video stills (i.ytimg.com) are built from the video ID: maxresdefault.jpg (1280×720), which
 //   not every video has (checked with a HEAD request), then hqdefault.jpg (480×360), which every
 //   video has.
@@ -39,7 +41,7 @@ export async function thumbnailsFor(yt, hasMaxres = hasMaxresThumbnail) {
     const base = t.url.replace(ART_SUFFIX, "");
     return [
       { url: `${base}=w${ART_SIZE}-h${ART_SIZE}-l90-rj`, width: ART_SIZE, height: ART_SIZE },
-      { url: `${base}=s0`, width: null, height: null },
+      { url: `${base}=s0` },
     ];
   }
   if (host === "i.ytimg.com" || !t?.url) {
@@ -47,5 +49,5 @@ export async function thumbnailsFor(yt, hasMaxres = hasMaxresThumbnail) {
     const hq = { url: `${vi}/hqdefault.jpg`, width: 480, height: 360 };
     return (await hasMaxres(yt.videoId)) ? [{ url: `${vi}/maxresdefault.jpg`, width: 1280, height: 720 }, hq] : [hq];
   }
-  return [{ url: t.url, width: t.width ?? null, height: t.height ?? null }];
+  return [{ url: t.url, ...(t.width && t.height ? { width: t.width, height: t.height } : {}) }];
 }

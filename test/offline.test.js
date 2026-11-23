@@ -63,7 +63,7 @@ test("thumbnails: album art at 544 then original; video stills maxres (if it exi
   const art = { url: "https://yt3.googleusercontent.com/abc=w120-h120-l90-rj", width: 120, height: 120 };
   assert.deepEqual(await thumbnailsFor({ videoId: "s", thumbnail: art }, async () => assert.fail("no HEAD for album art")), [
     { url: "https://yt3.googleusercontent.com/abc=w544-h544-l90-rj", width: 544, height: 544 },
-    { url: "https://yt3.googleusercontent.com/abc=s0", width: null, height: null },
+    { url: "https://yt3.googleusercontent.com/abc=s0" }, // size unknown: no width or height
   ]);
   const still = { url: "https://i.ytimg.com/vi/v1/hqdefault.jpg?sqp=x", width: 400, height: 225 };
   const hq = { url: "https://i.ytimg.com/vi/v1/hqdefault.jpg", width: 480, height: 360 };
