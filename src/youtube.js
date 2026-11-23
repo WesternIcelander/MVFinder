@@ -1,4 +1,5 @@
-// YouTube Music search through youtubei.js, with automatic, verified library updates.
+// YouTube Music (and plain YouTube) search through youtubei.js, with automatic, verified library
+// updates.
 //
 // The library is installed outside the app (baked-in baseline at /opt/ytjs, updates under
 // DATA_DIR/ytjs/<version>). A new version is only switched in after it passes a live self-test,
@@ -59,7 +60,10 @@ export function toResult(item) {
   if (!artists.length) {
     // Artists without a channel link aren't parsed; read them from the "Artist • Album • 3:33" line.
     const subtitle = item.flex_columns?.[1]?.title?.text ?? "";
-    artists = subtitle.split(" • ")[0].split(/\s*(?:,|&)\s*/).map((a) => a.trim()).filter(Boolean);
+    // Episode-type items ("non_music_track") read "Apr 5, 2023 • Channel" instead.
+    const parts = subtitle.split(" • ");
+    const who = /^[A-Z][a-z]{2} \d{1,2}, \d{4}$/.test(parts[0]) ? (parts[1] ?? "") : parts[0];
+    artists = who.split(/\s*(?:,|&)\s*/).map((a) => a.trim()).filter(Boolean);
   }
   return {
     videoId: item.id,
@@ -70,6 +74,33 @@ export function toResult(item) {
     album: item.album?.name ?? null,
     durationMs: item.duration?.seconds != null ? item.duration.seconds * 1000 : null,
     thumbnail: largestThumbnail(item.thumbnail?.contents ?? item.thumbnails),
+  };
+}
+
+/**
+ * Convert a youtubei.js Video (regular YouTube search) into our result shape. YouTube doesn't say
+ * what kind of video it is, so: an auto-generated "Artist - Topic" upload is a song; on a verified
+ * artist's or VEVO channel the title decides (music_video, lyric_video, visualizer,
+ * official_audio, else official_video); anything else is just a "video".
+ */
+export function toYouTubeResult(v) {
+  const videoId = v?.video_id ?? v?.id;
+  if (!videoId) return null;
+  const title = v.title?.text ?? (typeof v.title === "string" ? v.title : "");
+  const channel = v.author?.name && v.author.name !== "N/A" ? v.author.name : null;
+  const topic = / - Topic$/.test(channel ?? "");
+  const official = topic || v.author?.is_verified_artist === true || /VEVO$/.test(channel ?? "");
+  return {
+    videoId,
+    videoType: null,
+    kind: topic ? "song" : official ? refineKind("official_video", title) : "video",
+    title,
+    channel,
+    artists: topic ? [channel.replace(/ - Topic$/, "")] : [],
+    album: null,
+    durationMs: v.duration?.seconds ? v.duration.seconds * 1000 : null,
+    live: v.is_live === true,
+    thumbnail: largestThumbnail(v.thumbnails),
   };
 }
 
@@ -127,7 +158,7 @@ export class Client {
     this.sessions[n] = { promise, createdAt: Date.now() };
   }
 
-  /** filter: "songs" | "videos" */
+  /** filter: "songs" | "videos" (YouTube Music) | "youtube" (regular YouTube, videos only) */
   // Sessions can go bad or stale, and under bursts YouTube refuses some searches (403) for a
   // little while. So on failure, wait, replace this session (only), and try again.
   async search(query, filter, sessionIndex = 0) {
@@ -146,6 +177,10 @@ export class Client {
   }
 
   async searchWith(yt, query, filter) {
+    if (filter === "youtube") {
+      const r = await yt.search(query, { type: "video" });
+      return (r.results ?? []).filter((x) => x.type === "Video").map(toYouTubeResult).filter(Boolean);
+    }
     const r = await yt.music.search(query, { type: filter === "songs" ? "song" : "video" });
     return (r.contents ?? [])
       .filter((s) => s.type === "MusicShelf")
@@ -165,6 +200,10 @@ async function selfTest(client) {
   const videos = await client.search(q, "videos");
   if (!videos.some((r) => r.videoType === "MUSIC_VIDEO_TYPE_OMV" && r.artists.length && r.durationMs)) {
     throw new Error(`self-test: video search gave ${videos.length} results, none a complete official video`);
+  }
+  const plain = await client.search(q, "youtube");
+  if (!plain.some((r) => r.kind === "music_video" && r.channel && r.durationMs)) {
+    throw new Error(`self-test: YouTube search gave ${plain.length} results, none a complete official music video`);
   }
 }
 
@@ -319,7 +358,7 @@ export class YouTubeManager {
     }
   }
 
-  /** filter: "songs" | "videos"; session: 0 = main session, 1+ = alternative sessions */
+  /** filter: "songs" | "videos" | "youtube"; session: 0 = main session, 1+ = alternative sessions */
   async search(query, filter, { session = 0 } = {}) {
     const client = this.client;
     if (!client) {

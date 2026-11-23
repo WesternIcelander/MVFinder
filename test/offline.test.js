@@ -57,6 +57,8 @@ test("toResult reads youtubei.js song and video items", () => {
   assert.equal(video.thumbnail, null);
   assert.deepEqual(video.artists, ["The Weeknd"]);
   assert.equal(toResult({ title: "no id" }), null);
+  const episode = toResult({ id: "ep", title: "X (Lyrics)", flex_columns: [{}, { title: { text: "Apr 5, 2023 • Soundsonic" } }] });
+  assert.deepEqual(episode.artists, ["Soundsonic"]); // not the date
 });
 
 test("thumbnails: album art at 544 then original; video stills maxres (if it exists) then hq", async () => {

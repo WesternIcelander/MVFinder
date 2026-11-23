@@ -11,6 +11,7 @@ GET /tidal.com/track/251380837
 GET /tidal.com/album/251380836
 GET /tidal.com/playlist/36ea71a8-445e-41a4-82ab-6628c581535d
 GET /isrc/JP92Q2503558
+GET /search?query=beyonce+cuff+it
 ```
 
 The path is the link without `https://`: `https://open.spotify.com/playlist/33YxQ9R7gaOhNOjA1nKph1` →
@@ -179,6 +180,35 @@ gives `404`.
 Status codes: `400` if the input isn't an ISRC, `404` if no source has it, and `503` (temporary;
 a source is rate limited or unavailable) or `502` (a source failed) if it wasn't found but some
 source couldn't be asked.
+
+### `GET /search?query={search terms}`
+
+A free-text search, on YouTube by default or on YouTube Music with `music=1`. Returns
+`{ "query": "beyonce cuff it", "matches": [...] }`, in YouTube's order. Each match has the same fields
+as a lookup's matches except `confidence` and `matchedBy`, since there's nothing to compare against.
+
+| Query parameter | Default | |
+|---|---|---|
+| `query` | (required) | The search terms, up to 200 characters |
+| `music` | off | Search YouTube Music instead of YouTube |
+| `type` | `all` | With `music=1`: `song`, `video` or `all` |
+| `limit` | `10` | Results to return, 1–20 |
+
+**YouTube** (default) returns videos of any kind, live streams included (`"live": true`, with
+`durationMs` `null`). Each has a `channel` instead of `artists`. YouTube doesn't say what kind of
+video a result is, so `type` is inferred:
+
+- `song`: an auto-generated "Artist - Topic" upload (also gets `artists`).
+- On a verified artist's or VEVO channel, the title decides: `music_video`, `lyric_video`,
+  `visualizer`, `official_audio`, else `official_video`.
+- `video`: anything else, including fan uploads titled "Official Music Video".
+
+**YouTube Music** (`music=1`) runs its song search and its video search, and alternates their
+results (song, video, song, …), with duplicates removed. Types come from YouTube Music's own
+classification, as for lookups. `url` points to YouTube Music for songs.
+
+Results are cached for 1 hour (case and extra spaces in the query don't matter). Status `400` for
+a missing or too long `query`, a bad `limit`, or `type` without `music=1`.
 
 #### Errors
 

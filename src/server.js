@@ -8,6 +8,7 @@ import { cacheDb, closeCacheDb, importLegacyJson, openStore, purgeExpired } from
 import { NOT_FOUND_MESSAGE, parseRoute, requestUrl } from "./routes.js";
 import { getTidalItem, lookupTidalTrack, tidalStatus } from "./tidal.js";
 import { hasMaxresThumbnail } from "./thumbnails.js";
+import { createSearch, parseSearchParams } from "./search.js";
 import { HttpError, log } from "./util.js";
 import { YouTubeManager } from "./youtube.js";
 
@@ -22,6 +23,7 @@ setInterval(() => purgeExpired(cacheDb()), 3600_000).unref();
 // A list's track without an ISRC gets its full record from its own service.
 const lookupFull = (track) => (track.service === "tidal" ? lookupTidalTrack(track.id) : lookupTrack(track.id));
 const resolver = createResolver({ youtube, lookupTrack: lookupFull, lookupLocalizedTrack, degraded: spotifyDegraded, store: matchStore, hasMaxresThumbnail, ...config.cache });
+const search = createSearch({ youtube, hasMaxresThumbnail, store: openStore("searches", { maxEntries: 5000 }) });
 
 async function handle(url) {
   const route = parseRoute(url.pathname);
@@ -30,6 +32,11 @@ async function handle(url) {
   if (route.route === "health") {
     const yt = youtube.health();
     return [yt.ok ? 200 : 503, { status: yt.ok ? "ok" : "degraded", youtube: yt, spotify: spotifyStatus(), tidal: tidalStatus(), cacheEntries: resolver.cacheSize() }];
+  }
+
+  if (route.route === "search") {
+    const opts = parseSearchParams(url.searchParams);
+    return [200, { query: opts.query, matches: await search.search(opts) }];
   }
 
   if (route.route === "isrc") {

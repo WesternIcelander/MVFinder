@@ -22,14 +22,15 @@ const ROUTES = [
 const ISRC_ROUTE = /^\/isrc\/([^/]+)\/?$/;
 
 export const NOT_FOUND_MESSAGE =
-  "Not found. Use a Spotify or TIDAL link without https:// (GET /open.spotify.com/track/{id}, /tidal.com/track/{id}; also albums and playlists) or /isrc/{isrc}";
+  "Not found. Use a Spotify or TIDAL link without https:// (GET /open.spotify.com/track/{id}, /tidal.com/track/{id}; also albums and playlists), /isrc/{isrc}, or /search?query=…";
 
 /** The request URL, with leading slashes collapsed so "//open.spotify.com/…" isn't read as a host. */
 export const requestUrl = (rawUrl) => new URL(String(rawUrl).replace(/^\/+/, "/"), "http://localhost");
 
-/** { route: "health" } | { route: "item", service, type, id } | { route: "isrc", isrc } | null */
+/** { route: "health" | "search" } | { route: "item", service, type, id } | { route: "isrc", isrc } | null */
 export function parseRoute(pathname) {
   if (pathname === "/health") return { route: "health" };
+  if (pathname === "/search" || pathname === "/search/") return { route: "search" };
   for (const { service, re } of ROUTES) {
     const m = pathname.match(re);
     if (!m) continue;
